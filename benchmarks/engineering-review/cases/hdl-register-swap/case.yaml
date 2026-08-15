@@ -1,0 +1,27 @@
+schemaVersion: 1
+id: hdl-register-swap
+domain: hdl
+difficulty: standard
+riskTags: [sequential-semantics, blocking-assignment]
+taskFile: task.md
+variants:
+  buggy:
+    patch: buggy.patch
+    expectedOracle: fail
+    expectedFindings: [sequential-blocking-assignment]
+  fixed:
+    patch: fixed.patch
+    expectedOracle: pass
+    forbiddenFindings: [sequential-blocking-assignment, missing-reset]
+gold:
+  - id: sequential-blocking-assignment
+    category: hdl-width-and-sequential-semantics
+    path: register_swap.sv
+    anchor: always_ff
+    lineRange: [9, 16]
+    minimumSeverity: high
+oracle:
+  argv: [node, oracle/oracle.mjs]
+  timeoutMs: 20000
+  unavailableExitCode: 77
+  fixEligible: true

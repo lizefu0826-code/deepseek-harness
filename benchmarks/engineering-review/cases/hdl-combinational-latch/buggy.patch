@@ -1,0 +1,14 @@
+diff --git a/packet_select.sv b/packet_select.sv
+--- a/packet_select.sv
++++ b/packet_select.sv
+@@ -3,5 +3,9 @@ module packet_select (
+   input  logic [7:0] data,
+   output logic [7:0] selected
+ );
+-  // Candidate implementation is applied by the benchmark runner.
++  always_comb begin
++    if (valid) begin
++      selected = data;
++    end
++  end
+ endmodule

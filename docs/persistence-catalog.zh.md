@@ -391,6 +391,19 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/compaction/compaction/src/types.ts:33`](../packages/compaction/compaction/src/types.ts)
 
+### `engineering-review/*`
+
+<a id="engineering-reviewresult--log-only"></a>
+
+#### `engineering-review/result` — 仅日志
+
+```ts persistence-catalog
+/** Compact, log-only result for one reviewed change fingerprint. */
+'engineering-review/result': EngineeringReviewLogData
+```
+
+来源：[`packages/guard/engineering-review/src/types.ts:144`](../packages/guard/engineering-review/src/types.ts)
+
 ### `feedback/*`
 
 <a id="feedbackrecord--log-only"></a>

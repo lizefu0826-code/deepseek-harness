@@ -13,6 +13,7 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const cliVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version
 const dshBin = join(repoRoot, 'apps/cli/lib/bin.js')
 const invalidProvider = fileURLToPath(new URL('./fixtures/invalid-provider.cordis.yml', import.meta.url))
+const engineeringReviewOverlay = join(repoRoot, 'examples/web-cordis/engineering-review.cordis.yml')
 
 async function runBuiltBin(
   args: readonly string[] = [],
@@ -310,6 +311,48 @@ function startStartupProfile(fixture: StartupFixture, args: readonly string[]) {
 }
 
 describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', () => {
+  it('boots the engineering-review Web overlay through the published CLI dependency closure', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-engineering-review-web-'))
+    const child = execa(
+      process.execPath,
+      [dshBin, 'web', '--patch', engineeringReviewOverlay, '--port', '0'],
+      {
+        cwd: repoRoot,
+        reject: false,
+        env: {
+          ...process.env,
+          DSH_HOME: home,
+          DSH_TELEMETRY_DISABLED: '1',
+          DEEPSEEK_API_KEY: '',
+        },
+      },
+    )
+    let stdout = ''
+    try {
+      const readyUrl = await new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error(`engineering-review Web overlay did not become ready. stdout:\n${stdout}`))
+        }, 20_000)
+        child.stdout?.on('data', (chunk: Buffer) => {
+          stdout += chunk.toString()
+          const match = /dsh web: (http:\/\/127\.0\.0\.1:\d+)/u.exec(stdout)
+          if (match?.[1] === undefined) return
+          clearTimeout(timeout)
+          resolve(match[1])
+        })
+        void child.then((result) => {
+          clearTimeout(timeout)
+          reject(new Error(`engineering-review Web overlay exited before readiness (${String(result.exitCode)}):\n${result.stderr}`))
+        })
+      })
+      expect(readyUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u)
+    } finally {
+      child.kill('SIGKILL')
+      await child
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('requires --profile and rejects removed commands', async () => {
     const bare = await runBuiltBin()
     expect(bare.code).toBe(1)

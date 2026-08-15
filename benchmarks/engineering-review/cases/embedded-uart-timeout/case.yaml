@@ -1,0 +1,27 @@
+schemaVersion: 1
+id: embedded-uart-timeout
+domain: embedded
+difficulty: standard
+riskTags: [blocking, timeout, recovery]
+taskFile: task.md
+variants:
+  buggy:
+    patch: buggy.patch
+    expectedOracle: fail
+    expectedFindings: [uart-unbounded-wait]
+  fixed:
+    patch: fixed.patch
+    expectedOracle: pass
+    forbiddenFindings: [uart-unbounded-wait, uart-rollover-unsafe]
+gold:
+  - id: uart-unbounded-wait
+    category: timeout-and-recovery
+    path: uart_timeout.c
+    anchor: uart_wait_ready
+    lineRange: [3, 9]
+    minimumSeverity: high
+oracle:
+  argv: [node, oracle/oracle.mjs]
+  timeoutMs: 10000
+  unavailableExitCode: 77
+  fixEligible: true

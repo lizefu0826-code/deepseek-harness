@@ -1,0 +1,27 @@
+schemaVersion: 1
+id: hdl-combinational-latch
+domain: hdl
+difficulty: standard
+riskTags: [combinational-logic, latch, default-assignment]
+taskFile: task.md
+variants:
+  buggy:
+    patch: buggy.patch
+    expectedOracle: fail
+    expectedFindings: [combinational-latch]
+  fixed:
+    patch: fixed.patch
+    expectedOracle: pass
+    forbiddenFindings: [combinational-latch]
+gold:
+  - id: combinational-latch
+    category: hdl-width-and-sequential-semantics
+    path: packet_select.sv
+    anchor: always_comb
+    lineRange: [7, 13]
+    minimumSeverity: high
+oracle:
+  argv: [node, oracle/oracle.mjs]
+  timeoutMs: 20000
+  unavailableExitCode: 77
+  fixEligible: true

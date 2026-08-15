@@ -1,0 +1,12 @@
+diff --git a/load_config.mjs b/load_config.mjs
+--- a/load_config.mjs
++++ b/load_config.mjs
+@@ -1 +1,7 @@
+-// Candidate implementation is applied by the benchmark runner.
++export async function loadConfig(openConfig) {
++  const handle = await openConfig()
++  const text = await handle.readText()
++  const config = JSON.parse(text)
++  await handle.close()
++  return config
++}
