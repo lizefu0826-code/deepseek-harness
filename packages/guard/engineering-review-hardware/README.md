@@ -16,7 +16,7 @@ The first domain adapter for [`@deepseek-ai/dsh-engineering-review`](../engineer
     verilatorArgsFile: .dsh/verilator.args
 ```
 
-Both fields are optional workspace-relative paths. Without explicit paths, C/C++ review looks only for `compile_commands.json` or `build/compile_commands.json`; HDL review looks only for `.dsh/verilator.args`, `verilator.f`, or `verilator.args`. The adapter never creates these files, infers a build graph, installs either executable, or passes an automatic-fix option.
+Both fields are optional workspace-relative paths. Without explicit paths, C/C++ review looks only for `compile_commands.json` or `build/compile_commands.json`; HDL review looks only for `.dsh/verilator.args`, `verilator.f`, or `verilator.args`. The adapter never creates these files, infers a build graph, installs either executable, or passes an automatic-fix option. An explicitly configured path that does not exist is reported as a degraded-reason message ("configured compilationDatabase ... does not exist") instead of silently skipping the analyzer, so the user can tell the analyzer never ran.
 
 When an existing compilation database is available, the adapter contributes optional `clang-tidy -p <directory> <changed paths...>`. When an existing Verilator argument file is available, it contributes optional `verilator --lint-only -f <file>`. Missing executables or failed optional runs degrade to explicit main-model self-review through the core gate and do not become deterministic blockers by themselves.
 

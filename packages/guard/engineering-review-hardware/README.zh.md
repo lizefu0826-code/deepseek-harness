@@ -16,7 +16,7 @@
     verilatorArgsFile: .dsh/verilator.args
 ```
 
-两个字段都是可选的工作区相对路径。没有显式路径时，C/C++ 审查只查找 `compile_commands.json` 或 `build/compile_commands.json`；HDL 审查只查找 `.dsh/verilator.args`、`verilator.f` 或 `verilator.args`。适配器不会创建这些文件、猜测构建图、安装任一可执行程序，也不会传递自动修复选项。
+两个字段都是可选的工作区相对路径。没有显式路径时，C/C++ 审查只查找 `compile_commands.json` 或 `build/compile_commands.json`；HDL 审查只查找 `.dsh/verilator.args`、`verilator.f` 或 `verilator.args`。适配器不会创建这些文件、猜测构建图、安装任一可执行程序，也不会传递自动修复选项。显式配置的路径不存在时，会以降级原因消息上报（"configured compilationDatabase ... does not exist"），而不是静默跳过分析器，从而让用户知道分析器从未运行。
 
 存在 compilation database 时，适配器贡献可选的 `clang-tidy -p <directory> <changed paths...>`。存在 Verilator 参数文件时，它贡献可选的 `verilator --lint-only -f <file>`。可执行程序缺失或可选运行失败时，核心门禁会明确降级到主模型自审；这些失败本身不会形成确定性 blocker。
 
