@@ -1,6 +1,6 @@
 # Agent Note: 工程审查召回——reviewer 未应用任务声明的契约
 
-Status: proposed
+Status: implemented
 
 [English](2026-08-15-engineering-review-recall-diagnosis.md) | 中文
 
@@ -35,4 +35,4 @@ Status: proposed
 
 ## 补充观察：无 diff（非 Git）会话上的 reviewer 输出预算问题
 
-之后的一次降级（2026-08-16，GUI 会话）暴露了另一个相关但独立的 reviewer 行为失败：reviewer 在 8,192 token 上限下触顶 `max-tokens`，当时审查的是约 20 个文件的变更集。持久化的 reviewer 子代理记录展示了机制：非 Git 模式下审查请求没有文本 diff（`diff: ''`、truncated），reviewer 必须读文件才能知道改了什么；它跑了 25 步工具调用（含失败的读取、以及超出其工具过滤器的 glob/grep 尝试），然后把整个输出预算花在叙事性调查报告上（最后一步约 35K 字符），始终没有产出结构化 findings JSON，导致 `result.structured` 缺失、门禁降级。已应用两层修复：(1) prompt 层——reviewer 现在收到明确指令，最终消息必须是纯 JSON 对象、不得有散文，文件检查只用于验证具体候选；(2) 运行时层——当 reviewer 以 `max-tokens` 停止且无结构化结果时，`runReviewer` 用全新子代理重试一次，附带简洁作答指令、无工具、输出预算翻倍。另一个待探索的优化方向是：在轮次开始时快照工作区文件内容、审查时做 diff，从而给非 Git 审查提供真实 diff，让 reviewer 不必靠读整个工作区来重建变更。
+之后的一次降级（2026-08-16，GUI 会话）暴露了另一个相关但独立的 reviewer 行为失败：reviewer 在 8,192 token 上限下触顶 `max-tokens`，当时审查的是约 20 个文件的变更集。持久化的 reviewer 子代理记录展示了机制：非 Git 模式下审查请求没有文本 diff（`diff: ''`、truncated），reviewer 必须读文件才能知道改了什么；它跑了 25 步工具调用（含失败的读取、以及超出其工具过滤器的 glob/grep 尝试），然后把整个输出预算花在叙事性调查报告上（最后一步约 35K 字符），始终没有产出结构化 findings JSON，导致 `result.structured` 缺失、门禁降级。已应用三层修复：(1) prompt 层——reviewer 现在收到明确指令，最终消息必须是纯 JSON 对象、不得有散文，文件检查只用于验证具体候选；(2) 运行时层——当 reviewer 以 `max-tokens` 停止且无结构化结果时，`runReviewer` 用全新子代理重试一次，附带简洁作答指令、无工具、输出预算翻倍；(3) 结构层——非 Git 审查现在拿到真实 unified diff，因为每轮在文件首次变更时快照内容、审查时做 diff，空 diff 不授予工具，reviewer 直接作答而不是搜寻文件。完整变更集见 [加固笔记](2026-08-16-engineering-review-hardening.md)。
