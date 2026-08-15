@@ -63,7 +63,6 @@ import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
-import EngineeringReviewRuntime from '@deepseek-ai/dsh-engineering-review'
 import { githubSlug } from './verify-md-links.ts'
 
 /** Attachment seam marker that makes the attachments-conditional `read_image` schema harvestable. */
@@ -183,24 +182,6 @@ export interface ToolPackage {
  * guard proves it is exhaustive against the on-disk glob.
  */
 const TOOL_PACKAGES: ToolPackage[] = [
-  {
-    pkg: '@deepseek-ai/dsh-engineering-review',
-    dir: 'engineering-review',
-    source: 'packages/guard/engineering-review/src/index.ts',
-    requires: ['ctx.tools', 'ctx.agents', 'ctx.fs', 'ctx.subprocess', 'ctx.subagents', 'ctx.skills', 'a calling Agent at execution time'],
-    writes: ['tool/call', 'engineering-review/result', 'tool/result'],
-    async mount(ctx) {
-      await ctx.plugin(AgentRegistry)
-      await ctx.plugin(LocalFileSystem)
-      await ctx.plugin(LocalSubprocessRuntime)
-      await ctx.plugin(SkillRegistry)
-      await ctx.plugin(SubagentRuntime)
-      registerCatalogSubagentProvider(ctx, 'spawn')
-      await ctx.plugin(EngineeringReviewRuntime, { automatic: false })
-    },
-    note:
-      'The manual tool and automatic stopping gate share one fingerprint cache. `fast` follows the configured risk threshold; `deep` always requests a fresh structured reviewer. Automatic review is lifecycle-driven and does not synthesize a tool call.',
-  },
   {
     pkg: '@deepseek-ai/dsh-tool-ask-user',
     dir: 'tool-ask-user',
@@ -712,7 +693,7 @@ export function render(catalog: ToolCatalog): string {
     '',
     'This file is GENERATED and verified fresh by `pnpm run verify-tool-catalog` (part of `doc-sync`) — do not edit it by hand. Unlike the cordis catalog (a pure source-AST pass), this generator BOOTS each tool plugin on a real context and reads `ctx.tools.schemas()`, because a tool schema is not statically knowable (runtime-spread enums, concatenated descriptions, config-driven names, raw-JSON-Schema MCP tools). A completeness guard globs `packages/*/tool-*` and fails if any package is missing from the generator\'s boot manifest, so a new tool cannot be silently undocumented. See [the tool-schema-catalog Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md).',
     '',
-    'Scope: shipped product tools under `packages/*/tool-*` plus explicitly audited model-facing tools owned by a service package, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`\'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog\'s packages-only scope.',
+    'Scope: shipped product tools under `packages/*/tool-*`, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`\'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog\'s packages-only scope.',
     '',
     '## Tool Package Map',
     '',

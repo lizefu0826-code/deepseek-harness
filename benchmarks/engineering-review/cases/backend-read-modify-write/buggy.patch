@@ -1,9 +1,0 @@
-diff --git a/counter.mjs b/counter.mjs
---- a/counter.mjs
-+++ b/counter.mjs
-@@ -1 +1,4 @@
--// Candidate implementation is applied by the benchmark runner.
-+export async function incrementCounter(store) {
-+  const current = await store.read()
-+  await store.write(current + 1)
-+}

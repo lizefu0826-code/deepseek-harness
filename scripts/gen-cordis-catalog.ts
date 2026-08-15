@@ -67,7 +67,6 @@ export const SERVICE_PAGE: Record<string, string> = {
   credentials: 'credentials.md',
   directoryPicker: 'workspace.md',
   dynamicCordisRunner: 'extensions.md',
-  engineeringReview: 'engineering-review.md',
   e2b: 'subprocess.md',
   fs: 'filesystem.md',
   goals: 'goal.md',
@@ -215,9 +214,6 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
   Agent: 'core.md',
-  EngineeringReviewAdapter: 'engineering-review.md',
-  EngineeringReviewReport: 'engineering-review.md',
-  EngineeringReviewRequest: 'engineering-review.md',
   AgentCancelCause: 'core.md',
   AgentFactory: 'core.md',
   AgentHandle: 'core.md',

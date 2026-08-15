@@ -587,61 +587,6 @@ export interface Config {
 
 来源：[`packages/e2b/e2b/src/index.ts:43`](../packages/e2b/e2b/src/index.ts)
 
-<a id="deepseek-aidsh-engineering-review"></a>
-
-## `@deepseek-ai/dsh-engineering-review`
-
-依赖：`agents` · `tools` · `fs` · `subprocess` · `subagents` · `skills`
-
-```ts config-catalog
-/** Runtime configuration. The package is opt-in; once mounted, automatic review defaults on. */
-export interface Config {
-  /** Whether stopping boundaries run the gate automatically (default true once mounted). */
-  readonly automatic?: boolean
-  /** Minimum assembled risk that starts the isolated reviewer (default medium). */
-  readonly riskThreshold?: EngineeringRisk
-  /** Number of blocker correction steers before the final report; zero is report-only (default 2). */
-  readonly maxCorrectionPasses?: number
-  /** Maximum UTF-8 diff bytes supplied to review (default 512 KiB). */
-  readonly maxDiffBytes?: number
-  /** Maximum Git paths captured before overflow becomes high risk (default 100). */
-  readonly maxFiles?: number
-  /** Default deadline for one deterministic check in milliseconds (default 120000). */
-  readonly checkTimeoutMs?: number
-  /** Named fresh one-shot subagent provider used for review (default spawn). */
-  readonly subagentProvider?: string
-  /** Optional LLM provider override for the reviewer; omission inherits the parent. */
-  readonly reviewerProvider?: string
-  /** Optional LLM model override for the reviewer; omission inherits the parent. */
-  readonly reviewerModel?: string
-  /** Maximum output tokens for each isolated reviewer request (default 8192). */
-  readonly reviewerMaxTokens?: number
-}
-
-/** Ordered engineering risk used by adapters and review policy. */
-export type EngineeringRisk = 'low' | 'medium' | 'high'
-```
-
-来源：[`packages/guard/engineering-review/src/index.ts:76`](../packages/guard/engineering-review/src/index.ts)
-
-<a id="deepseek-aidsh-engineering-review-hardware"></a>
-
-## `@deepseek-ai/dsh-engineering-review-hardware`
-
-依赖：`engineeringReview`
-
-```ts config-catalog
-/** Optional existing project metadata paths; this adapter never generates them. */
-export interface Config {
-  /** Existing workspace-relative `compile_commands.json` path. */
-  readonly compilationDatabase?: string
-  /** Existing workspace-relative Verilator argument-file path. */
-  readonly verilatorArgsFile?: string
-}
-```
-
-来源：[`packages/guard/engineering-review-hardware/src/index.ts:16`](../packages/guard/engineering-review-hardware/src/index.ts)
-
 <a id="deepseek-aidsh-fs-local"></a>
 
 ## `@deepseek-ai/dsh-fs-local`

@@ -97,15 +97,6 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
-    key: 'engineeringReview',
-    pkg: 'engineering-review',
-    title: 'Risk-based engineering quality gate',
-    mode: 'seam',
-    implementations: ['engineering-review-hardware'],
-    consumers: [],
-    note: 'The core owns fingerprints, deterministic checks, reviewer normalization, correction policy, and compact results; adapters contribute only risk, focus, and check recipes.',
-  },
-  {
     key: 'attachments',
     pkg: 'attachment',
     title: 'Durable binary attachment storage',

@@ -284,9 +284,8 @@ export function taskkillProcessTree(pid: number): void {
 /**
  * Signal a detached process tree with platform-correct semantics: POSIX
  * signals the negative process-group id and falls back to the direct child
- * when the group is gone; Windows attempts taskkill for the tree and also
- * signals the direct child so a denied or unavailable taskkill cannot strand
- * the managed root (Node maps either signal to TerminateProcess).
+ * when the group is gone; Windows terminates the tree via taskkill (any
+ * signal value force-terminates — Node maps signals to TerminateProcess).
  */
 function signalTree(
   platform: NodeJS.Platform,
@@ -297,11 +296,6 @@ function signalTree(
 ): void {
   if (platform === 'win32') {
     taskkill(pid)
-    try {
-      child.kill(sig)
-    } catch {
-      // taskkill may already have removed the root; termination is idempotent.
-    }
     return
   }
   /* v8 ignore next -- kill/terminate gate on treeAlive(), which is false for pid -1; this guard protects direct callers only. */

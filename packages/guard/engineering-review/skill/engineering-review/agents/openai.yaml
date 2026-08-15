@@ -1,4 +1,0 @@
-interface:
-  display_name: "Engineering Review"
-  short_description: "Review engineering changes for systemic risks"
-  default_prompt: "Use $engineering-review to review this engineering change before completion."

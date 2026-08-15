@@ -563,25 +563,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
-    key: 'engineeringReview',
-    summary: 'Generic engineering review engine and adapter registry.',
-    description: 'Generic engineering review engine and adapter registry.',
-    methods: [
-      {
-        signature: 'registerAdapter(adapter: EngineeringReviewAdapter): () => void',
-        description: 'Register one adapter until the calling plugin is disposed.',
-        parameters: [{ name: 'adapter', description: 'domain contribution provider with one stable id.' }],
-        returns: 'the exact Cordis effect disposer for this registration.',
-      },
-      {
-        signature: 'review(request: EngineeringReviewRequest): Promise<EngineeringReviewReport>',
-        description: 'Review one immutable change fingerprint, sharing in-flight and completed work.',
-        parameters: [{ name: 'request', description: 'bounded evidence, route owner, depth, and workspace readers.' }],
-        returns: 'the canonical deterministic and reviewer report.',
-      },
-    ],
-  },
-  {
     key: 'fs',
     summary: 'Abstract filesystem provider.',
     description: 'Abstract filesystem provider. Targets must preserve identity across aliases; reads expose regular UTF-8 text or typed errors, listings are stable and content-free, and mutations are atomic. Optional guards add stale protection without changing the unguarded provider contract.',
@@ -3043,58 +3024,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'EditGoalRequest',
     declaration: 'export interface EditGoalRequest {\n    readonly objective?: string;\n    readonly maxGoalRounds?: number;\n}',
-  },
-  {
-    name: 'EngineeringCheckRecipe',
-    declaration: 'export interface EngineeringCheckRecipe {\n    readonly id: string;\n    readonly argv: readonly string[];\n    readonly cwd?: string;\n    readonly files?: readonly string[];\n    readonly timeoutMs?: number;\n    readonly required?: boolean;\n}',
-  },
-  {
-    name: 'EngineeringCheckResult',
-    declaration: 'export interface EngineeringCheckResult {\n    readonly id: string;\n    readonly status: \'passed\' | \'failed\' | \'skipped\' | \'unavailable\';\n    readonly required: boolean;\n    readonly summary: string;\n}',
-  },
-  {
-    name: 'EngineeringFinding',
-    declaration: 'export interface EngineeringFinding {\n    readonly id: string;\n    readonly category: EngineeringFindingCategory;\n    readonly severity: \'blocker\' | \'warning\';\n    readonly confidence: \'high\' | \'medium\' | \'low\';\n    readonly title: string;\n    readonly evidence: readonly EngineeringFindingEvidence[];\n    readonly impact: string;\n    readonly recommendation: string;\n    readonly validation: string;\n}',
-  },
-  {
-    name: 'EngineeringFindingCategory',
-    declaration: 'export type EngineeringFindingCategory = typeof REVIEW_CATEGORIES[number];',
-  },
-  {
-    name: 'EngineeringFindingEvidence',
-    declaration: 'export interface EngineeringFindingEvidence {\n    readonly path: string;\n    readonly line?: number;\n    readonly detail: string;\n}',
-  },
-  {
-    name: 'EngineeringReviewAdapter',
-    declaration: 'export interface EngineeringReviewAdapter {\n    readonly id: string;\n    contribute(request: EngineeringReviewRequest, signal: AbortSignal): Promise<EngineeringReviewContribution | undefined>;\n}',
-  },
-  {
-    name: 'EngineeringReviewContribution',
-    declaration: 'export interface EngineeringReviewContribution {\n    readonly riskSignals?: readonly EngineeringRiskSignal[];\n    readonly focus?: readonly string[];\n    readonly checks?: readonly EngineeringCheckRecipe[];\n}',
-  },
-  {
-    name: 'EngineeringReviewDepth',
-    declaration: 'export type EngineeringReviewDepth = \'fast\' | \'deep\';',
-  },
-  {
-    name: 'EngineeringReviewerResult',
-    declaration: 'export interface EngineeringReviewerResult {\n    readonly used: boolean;\n    readonly provider?: string;\n    readonly model?: string;\n    readonly degradedReason?: string;\n}',
-  },
-  {
-    name: 'EngineeringReviewReport',
-    declaration: 'export interface EngineeringReviewReport {\n    readonly fingerprint: string;\n    readonly risk: EngineeringRisk;\n    readonly passed: boolean;\n    readonly checks: readonly EngineeringCheckResult[];\n    readonly findings: readonly EngineeringFinding[];\n    readonly reviewer: EngineeringReviewerResult;\n    readonly degradedReasons: readonly string[];\n}',
-  },
-  {
-    name: 'EngineeringReviewRequest',
-    declaration: 'export interface EngineeringReviewRequest {\n    readonly agent: Agent;\n    readonly signal: AbortSignal;\n    readonly cwd: string;\n    readonly fingerprint: string;\n    readonly changedPaths: readonly string[];\n    readonly diff: string;\n    readonly diffTruncated: boolean;\n    readonly taskContext?: string;\n    readonly depth: EngineeringReviewDepth;\n    readonly focus?: readonly string[];\n    readonly unknownShellMutation?: boolean;\n    readText(relativePath: string): Promise<string | undefined>;\n    hasFile(relativePath: string): Promise<boolean>;\n}',
-  },
-  {
-    name: 'EngineeringRisk',
-    declaration: 'export type EngineeringRisk = \'low\' | \'medium\' | \'high\';',
-  },
-  {
-    name: 'EngineeringRiskSignal',
-    declaration: 'export interface EngineeringRiskSignal {\n    readonly risk: EngineeringRisk;\n    readonly reason: string;\n}',
   },
   {
     name: 'EpochHeader',

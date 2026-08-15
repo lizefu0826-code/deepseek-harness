@@ -55,8 +55,6 @@ const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta
 const reasoningConfigPath = fileURLToPath(new URL('./fixtures/cli.cordis.yml', import.meta.url))
 const deepseekDefaultsConfigPath = fileURLToPath(new URL('./fixtures/deepseek-defaults.cordis.yml', import.meta.url))
 const headlessOverlayPath = fileURLToPath(new URL('./fixtures/headless-profile.cordis.yml', import.meta.url))
-const engineeringReviewOverlayPath = fileURLToPath(new URL('../engineering-review.cordis.snapshot.yml', import.meta.url))
-const engineeringReviewMockPath = fileURLToPath(new URL('./fixtures/engineering-review-mock-llm.ts', import.meta.url))
 const headlessSessionExpected = join(snapshotsDir, 'headless-profile', 'session.expected.jsonl')
 const headlessFailureExpected = join(snapshotsDir, 'headless-profile', 'stderr.expected.txt')
 const cliMockLlmPluginPath = fileURLToPath(new URL('./fixtures/cli-mock-llm.ts', import.meta.url))
@@ -220,16 +218,6 @@ async function prepareCliMockFixture(cwd: string): Promise<void> {
   ])
 }
 
-/** Install the engineering-review gate mock adapter into the temporary profile. */
-async function prepareEngineeringReviewFixture(cwd: string): Promise<void> {
-  const fixtureDir = join(cwd, '.dsh', 'profiles', 'headless', 'snapshot-fixtures')
-  await mkdir(fixtureDir, { recursive: true })
-  await Promise.all([
-    copyFile(engineeringReviewMockPath, join(fixtureDir, 'engineering-review-mock-llm.ts')),
-    writeFile(join(fixtureDir, 'package.json'), '{"type":"module"}\n'),
-  ])
-}
-
 describe('headless stream-json snapshots', () => {
   it('runs one task through the product headless profile command', async () => {
     const task = 'Prove the product headless profile path with one real tool round trip.'
@@ -262,48 +250,6 @@ describe('headless stream-json snapshots', () => {
 
     expect(result.stdout).toBe('CLI tool round trip complete: CLI_TOOL_ROUND_TRIP\n')
     expect(result.stderr).toBe('')
-  }, LOADER_SMOKE_TEST_TIMEOUT_MS)
-
-  it('runs the automatic engineering review gate through the product headless profile', async () => {
-    const result = await runLoaderSmoke({
-      label: 'engineering review gate headless snapshot',
-      tempDirPrefix: 'headless-snapshot-engineering-review-',
-      binScript: dshBinScript,
-      configPath: engineeringReviewOverlayPath,
-      binArgs: ['--profile', 'headless', '--patch', engineeringReviewOverlayPath, 'Change the driver.'],
-      tsconfigPath,
-      processTimeoutMs: 90_000,
-      env: {
-        DSH_PERMISSION_MODE: 'danger-full-access',
-        DSH_TELEMETRY_DISABLED: '1',
-        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
-      },
-      prepare: prepareEngineeringReviewFixture,
-      inspect: async (cwd) => {
-        const logs = await persistedLogs(cwd, join(cwd, '.dsh', 'sessions'))
-        const parent = logs.find(log => typeof log.header.parentSession !== 'string')
-        if (parent === undefined) throw new Error('engineering review snapshot did not persist its parent session')
-        const records = parseJsonl(parent.content)
-        const results = records.filter(record => record.type === 'engineering-review/result')
-        expect(results).toHaveLength(1)
-        expect(results[0]?.data).toMatchObject({ passed: false, risk: 'medium' })
-        const notices = records
-          .filter(record => record.type === 'user/message')
-          .map(record => (record.data as JsonObject | undefined)?.source as JsonObject | undefined)
-          .filter((source): source is JsonObject => source?.kind === 'plugin')
-          .map(source => source.summary)
-        expect(notices).toEqual(expect.arrayContaining(['Correction pass 1/1', 'Final blocker report required']))
-        const blocked = records.find(record => record.type === 'tool/result'
-          && JSON.stringify(record.data).includes('file modification is disabled after the final blocker report'))
-        expect(blocked).toBeDefined()
-        // The isolated reviewer child persisted its own session under the parent.
-        const child = logs.find(log => typeof log.header.parentSession === 'string')
-        expect(child).toBeDefined()
-      },
-    })
-
-    expect(result.stderr).toBe('')
-    expect(result.stdout).toContain('Final blocker report.')
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
 
   it('prints a terminal model failure through the product headless profile command', async () => {

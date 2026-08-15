@@ -389,19 +389,6 @@ Types: [ContentBlock](subsystems/core.md) · [TokenUsage](subsystems/llm-streami
 
 Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compaction/compaction/src/types.ts)
 
-### `engineering-review/*`
-
-<a id="engineering-reviewresult--log-only"></a>
-
-#### `engineering-review/result` — log-only
-
-```ts persistence-catalog
-/** Compact, log-only result for one reviewed change fingerprint. */
-'engineering-review/result': EngineeringReviewLogData
-```
-
-Source: [`packages/guard/engineering-review/src/types.ts:144`](../packages/guard/engineering-review/src/types.ts)
-
 ### `feedback/*`
 
 <a id="feedbackrecord--log-only"></a>

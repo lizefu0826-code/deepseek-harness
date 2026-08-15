@@ -829,11 +829,19 @@ describe('coverage seams 2', () => {
     await expect(running.waitForExit()).resolves.toBe(true)
   })
 
-  it('an inert win32 taskkill falls back to direct-child termination', async () => {
+  it('an inert win32 taskkill leaves the tree alive for a bounded wait to report', async () => {
+    // An inert taskkill simulates a tree that never reports exit: terminate()
+    // delivers nothing, so a bounded consumer wait must come back false.
     const running = spawnSubprocess(spec('sleep 60'), { spillDir, platform: 'win32', taskkill: () => {} })
     running.terminate()
+    const bound = new AbortController()
+    const timer = setTimeout(() => { bound.abort() }, 60)
+    await expect(running.waitForExit(bound.signal)).resolves.toBe(false)
+    clearTimeout(timer)
+    // Real cleanup: the injected platform spawned without detachment, so the
+    // child is a plain (group-less) POSIX process — kill it directly.
+    process.kill(running.pid, 'SIGKILL')
     await running.done
-    await expect(running.waitForExit()).resolves.toBe(true)
   })
 
   it("stderr: 'pipe' exposes the raw stream", async () => {
