@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import { captureGitSnapshot, changedGitPaths } from '../src/git.ts'
+import { captureGitSnapshot, changedGitPaths, gitPatch } from '../src/git.ts'
 
 const runFile = promisify(execFile)
 const temporaryDirectories: string[] = []
@@ -47,5 +47,38 @@ describe('engineering review real Git capture', () => {
     await writeFile(join(root, 'unstaged.c'), 'edited again\n')
     const dirtier = await captureGitSnapshot(ctx, root, signal, 100)
     expect(changedGitPaths(dirty, dirtier)).toEqual(['unstaged.c'])
+  })
+
+  it('extracts empty, complete, and truncated patches for selected paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-engineering-git-patch-'))
+    temporaryDirectories.push(root)
+    await git(root, 'init')
+    await git(root, 'config', 'user.email', 'test@example.invalid')
+    await git(root, 'config', 'user.name', 'Test')
+    await writeFile(join(root, 'main.c'), 'base\n')
+    await git(root, 'add', '.')
+    await git(root, 'commit', '-m', 'base')
+    const ctx = new Context()
+    await ctx.plugin(LocalSubprocessRuntime)
+    const signal = new AbortController().signal
+
+    expect(await gitPatch(ctx, root, [], signal, 1024)).toEqual({ diff: '', truncated: false })
+
+    await writeFile(join(root, 'main.c'), 'base\nchanged line\n')
+    const complete = await gitPatch(ctx, root, ['main.c'], signal, 1024)
+    expect(complete.diff).toContain('+changed line')
+    expect(complete.truncated).toBe(false)
+
+    const truncated = await gitPatch(ctx, root, ['main.c'], signal, 10)
+    expect(truncated.truncated).toBe(true)
+    expect(Buffer.byteLength(truncated.diff)).toBeLessThanOrEqual(10)
+  })
+
+  it('reports a failed git status as an error snapshot capture', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-engineering-git-fail-'))
+    temporaryDirectories.push(root)
+    const ctx = new Context()
+    await ctx.plugin(LocalSubprocessRuntime)
+    await expect(captureGitSnapshot(ctx, root, new AbortController().signal, 100)).rejects.toThrow(/git status failed/u)
   })
 })

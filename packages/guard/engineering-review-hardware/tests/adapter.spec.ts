@@ -67,4 +67,81 @@ describe('hardware engineering review adapter', () => {
     apply(ctx)
     await expect(adapter?.contribute(request(['src/app.py'], []), new AbortController().signal)).resolves.toBeUndefined()
   })
+
+  it('reports explicit configuration that points at a missing tool input', async () => {
+    let adapter: EngineeringReviewAdapter | undefined
+    const ctx = new Context()
+    ctx.provide('engineeringReview', { registerAdapter(value: EngineeringReviewAdapter) { adapter = value; return () => {} } } as never)
+    apply(ctx, { compilationDatabase: 'build/compile_commands.json', verilatorArgsFile: '.dsh/verilator.args' })
+    const contribution = await adapter?.contribute(request(['src/uart.c', 'rtl/cdc.sv'], []), new AbortController().signal)
+    expect(contribution?.checks).toEqual([])
+    expect(contribution?.degradedReasons).toEqual([
+      'engineering-review-hardware: configured compilationDatabase "build/compile_commands.json" does not exist; clang-tidy check skipped',
+      'engineering-review-hardware: configured verilatorArgsFile ".dsh/verilator.args" does not exist; Verilator lint check skipped',
+    ])
+  })
+
+  it('honors an existing explicitly configured tool input without degrading', async () => {
+    let adapter: EngineeringReviewAdapter | undefined
+    const ctx = new Context()
+    ctx.provide('engineeringReview', { registerAdapter(value: EngineeringReviewAdapter) { adapter = value; return () => {} } } as never)
+    apply(ctx, { compilationDatabase: 'build/compile_commands.json' })
+    const contribution = await adapter?.contribute(
+      request(['src/uart.c'], ['build/compile_commands.json']),
+      new AbortController().signal,
+    )
+    expect(contribution?.checks?.map(check => check.id)).toEqual(['hardware:clang-tidy'])
+    expect(contribution?.degradedReasons).toBeUndefined()
+  })
+
+  it('rejects explicit configuration outside the workspace', () => {
+    const ctx = new Context()
+    ctx.provide('engineeringReview', { registerAdapter() { return () => {} } } as never)
+    expect(() => { apply(ctx, { compilationDatabase: '/abs/compile_commands.json' }) }).toThrow(/workspace-relative/u)
+    expect(() => { apply(ctx, { compilationDatabase: '' }) }).toThrow(/workspace-relative/u)
+    expect(() => { apply(ctx, { verilatorArgsFile: 'C:/abs/verilator.args' }) }).toThrow(/workspace-relative/u)
+    expect(() => { apply(ctx, { verilatorArgsFile: 'a/../b.args' }) }).toThrow(/workspace-relative/u)
+  })
+
+  it('raises unbounded for-loop polling but not a bounded for-loop body', async () => {
+    let adapter: EngineeringReviewAdapter | undefined
+    const ctx = new Context()
+    ctx.provide('engineeringReview', { registerAdapter(value: EngineeringReviewAdapter) { adapter = value; return () => {} } } as never)
+    apply(ctx)
+    const unbounded = await adapter?.contribute(request(
+      ['src/uart.c'],
+      [],
+      '+ for (;;) {\n+   poll_until_ready();\n+ }',
+    ), new AbortController().signal)
+    expect(unbounded?.riskSignals?.[0]?.risk).toBe('high')
+    const bounded = await adapter?.contribute(request(
+      ['src/uart.c'],
+      [],
+      '+ for (;;) {\n+   if (deadline_elapsed) break;\n+ }',
+    ), new AbortController().signal)
+    expect(bounded?.riskSignals?.[0]?.risk).toBe('medium')
+  })
+
+  it('uses an existing explicitly configured Verilator argument file', async () => {
+    let adapter: EngineeringReviewAdapter | undefined
+    const ctx = new Context()
+    ctx.provide('engineeringReview', { registerAdapter(value: EngineeringReviewAdapter) { adapter = value; return () => {} } } as never)
+    apply(ctx, { verilatorArgsFile: 'rtl/verilator.args' })
+    const contribution = await adapter?.contribute(
+      request(['rtl/cdc.sv'], ['rtl/verilator.args']),
+      new AbortController().signal,
+    )
+    expect(contribution?.checks?.[0]?.argv).toEqual(['verilator', '--lint-only', '-f', 'rtl/verilator.args'])
+    expect(contribution?.degradedReasons).toBeUndefined()
+  })
+
+  it('returns no Verilator check when no argument file exists', async () => {
+    let adapter: EngineeringReviewAdapter | undefined
+    const ctx = new Context()
+    ctx.provide('engineeringReview', { registerAdapter(value: EngineeringReviewAdapter) { adapter = value; return () => {} } } as never)
+    apply(ctx)
+    const contribution = await adapter?.contribute(request(['rtl/cdc.sv'], []), new AbortController().signal)
+    expect(contribution?.checks).toEqual([])
+    expect(contribution?.degradedReasons).toBeUndefined()
+  })
 })
