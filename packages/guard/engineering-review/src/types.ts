@@ -36,6 +36,8 @@ export interface EngineeringReviewContribution {
   readonly riskSignals?: readonly EngineeringRiskSignal[]
   readonly focus?: readonly string[]
   readonly checks?: readonly EngineeringCheckRecipe[]
+  /** Non-blocking capability failures (e.g. explicit configuration pointing at a missing tool). */
+  readonly degradedReasons?: readonly string[]
 }
 
 /** Inputs shared by automatic and manual review. */

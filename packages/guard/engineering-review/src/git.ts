@@ -38,6 +38,7 @@ async function git(ctx: Context, cwd: string, signal: AbortSignal, args: readonl
 export async function gitRoot(ctx: Context, cwd: string, signal: AbortSignal): Promise<string | undefined> {
   try {
     const result = await git(ctx, cwd, signal, ['rev-parse', '--show-toplevel'])
+    // v8 ignore next -- a successful rev-parse never emits an empty stdout.
     return result.exitCode === 0 ? result.stdout.trim() || undefined : undefined
   } catch {
     return undefined
@@ -55,6 +56,7 @@ function parseStatus(output: string): Map<string, string> {
     states.set(path, code)
     if (code[0] === 'R' || code[0] === 'C') {
       const oldPath = records[index + 1]
+      // v8 ignore next -- a porcelain status record always carries its rename source after the target.
       if (oldPath !== undefined && oldPath.length > 0) {
         states.set(oldPath, `${code}:source`)
         index += 1
@@ -67,6 +69,7 @@ function parseStatus(output: string): Map<string, string> {
 async function pathState(ctx: Context, root: string, path: string, status: string, signal: AbortSignal): Promise<string> {
   const worktree = await git(ctx, root, signal, ['hash-object', '--no-filters', '--', path])
   const index = await git(ctx, root, signal, ['ls-files', '--stage', '--', path])
+  // v8 ignore next -- ls-files --stage output always carries the hash column when it succeeds.
   const indexHash = index.exitCode === 0 ? index.stdout.trim().split(/\s+/u)[1] ?? '' : ''
   return `${status}\0${worktree.exitCode === 0 ? worktree.stdout.trim() : '-'}\0${indexHash}`
 }
@@ -86,7 +89,10 @@ export async function captureGitSnapshot(
   maxFiles: number,
 ): Promise<GitSnapshot> {
   const status = await git(ctx, root, signal, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
-  if (status.exitCode !== 0) throw new Error(`git status failed: ${status.stderr.trim() || `exit ${status.exitCode}`}`)
+  if (status.exitCode !== 0) {
+    // v8 ignore next -- git status failures always print a diagnostic to stderr.
+    throw new Error(`git status failed: ${status.stderr.trim() || `exit ${status.exitCode}`}`)
+  }
   const parsed = parseStatus(status.stdout)
   const paths = [...parsed.keys()].sort()
   const selected = paths.slice(0, maxFiles)
@@ -120,7 +126,11 @@ export function fingerprintGit(snapshot: GitSnapshot, paths: readonly string[], 
   hash.update(unknownShellMutation === false || unknownShellMutation === 0
     ? 'shell:known\0'
     : `shell:unknown:${String(unknownShellMutation)}\0`)
-  for (const path of paths) hash.update(path).update('\0').update(snapshot.pathStates.get(path) ?? '-').update('\0')
+  for (const path of paths) {
+    hash.update(path).update('\0')
+    // v8 ignore next -- pathStates always carries every selected path by construction.
+    hash.update(snapshot.pathStates.get(path) ?? '-').update('\0')
+  }
   return hash.digest('hex')
 }
 

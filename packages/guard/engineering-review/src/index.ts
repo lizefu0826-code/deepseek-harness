@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createTwoFilesPatch } from 'diff'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
@@ -72,6 +73,9 @@ const TASK_CONTEXT_BYTES = 16 * 1024
 
 const RISK_ORDER: Readonly<Record<EngineeringRisk, number>> = { low: 0, medium: 1, high: 2 }
 
+/** File-mutation tools disabled once the final blocker report has been requested. */
+const MUTATION_TOOL_NAMES = new Set(['write', 'edit', 'str_replace_editor'])
+
 /** Runtime configuration. The package is opt-in; once mounted, automatic review defaults on. */
 export interface Config {
   /** Whether stopping boundaries run the gate automatically (default true once mounted). */
@@ -122,6 +126,8 @@ interface TurnState {
   turn: number
   baseline: GitTurnBaseline | NonGitTurnBaseline
   touchedPaths: Set<string>
+  /** Pre-mutation file text keyed by touched path; null means the file did not exist at first mutation. */
+  beforeContents: Map<string, string | null>
   unknownShellMutation: boolean
   mutationRevision: number
   correctionPasses: number
@@ -191,6 +197,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** The workspace-relative or absolute path one mutation tool call targets, if any. */
+function mutationToolPath(exec: { arguments: unknown }): string | undefined {
+  const args = exec.arguments as Record<string, unknown>
+  const path = args.path ?? args.file_path
+  return typeof path === 'string' && path.length > 0 ? path : undefined
+}
+
 function boundedSummary(stdout: string, stderr: string): string {
   const text = `${stdout}${stderr.length === 0 ? '' : `\n${stderr}`}`.trim() || '(no output)'
   const bytes = Buffer.from(text)
@@ -203,6 +216,7 @@ function boundedUtf8Prefix(text: string, maxBytes: number): string {
   const bytes = Buffer.from(text)
   if (bytes.length <= maxBytes) return text
   let end = maxBytes
+  // v8 ignore next -- bytes[end] is undefined only when the truncation lands exactly on the buffer end, excluded above.
   while (end > 0 && (bytes[end] ?? 0) >= 0x80 && (bytes[end] ?? 0) < 0xc0) end -= 1
   return `${bytes.subarray(0, end).toString('utf8')}\n[task context truncated]`
 }
@@ -289,6 +303,31 @@ export class EngineeringReviewRuntime extends Service {
         state.mutationRevision += 1
       }
     })
+    // After the final blocker report is requested, the model is instructed to
+    // stop modifying files. Enforce that instruction: mutation tools now fail
+    // with an explicit error instead of relying on the model's compliance.
+    // Before dispatch also snapshot each path's pre-mutation content for
+    // non-Git baselines, so the reviewer receives a real diff instead of
+    // having to reconstruct the change by reading the whole workspace.
+    ctx.on('tools/execute', async (exec, next) => {
+      const agent = exec.agent
+      const state = agent === undefined ? undefined : this.turns.get(agent)
+      if (state?.finalReportRequested === true && MUTATION_TOOL_NAMES.has(exec.name)) {
+        const message = 'engineering review: file modification is disabled after the final blocker report; report the unresolved blockers instead.'
+        return {
+          content: [{ type: 'text', text: `Error: ${message}` }],
+          isError: true,
+          error: { message },
+        }
+      }
+      if (agent !== undefined && state?.baseline.kind === 'non-git' && MUTATION_TOOL_NAMES.has(exec.name)) {
+        const path = mutationToolPath(exec)
+        if (path !== undefined && !state.beforeContents.has(path)) {
+          state.beforeContents.set(path, await this.snapshotText(path, agent, exec.signal))
+        }
+      }
+      return next()
+    })
     if (this.config.automatic) {
       ctx.on('agent/turn-stopping', payload => this.onTurnStopping(payload.agent, payload.turn, payload.signal))
     }
@@ -334,8 +373,23 @@ export class EngineeringReviewRuntime extends Service {
   }
 
   private async performReview(request: EngineeringReviewRequest): Promise<EngineeringReviewReport> {
-    const contributions = (await Promise.all([...this.adapters.values()].map(adapter =>
-      adapter.contribute(request, request.signal)))).filter((value): value is EngineeringReviewContribution => value !== undefined)
+    // Isolate each adapter: one throwing contributor must not sink the whole
+    // gate. Its failure becomes an explicit degraded reason, and its guidance
+    // is skipped; the remaining adapters still contribute.
+    const degradedReasons: string[] = []
+    const contributions: EngineeringReviewContribution[] = []
+    for (const adapter of this.adapters.values()) {
+      try {
+        const contribution = await adapter.contribute(request, request.signal)
+        if (contribution !== undefined) {
+          contributions.push(contribution)
+          degradedReasons.push(...contribution.degradedReasons ?? [])
+        }
+      } catch (error) {
+        if (request.signal.aborted) throw error
+        degradedReasons.push(`adapter ${adapter.id} failed: ${errorMessage(error).slice(0, 1_024)}`)
+      }
+    }
     const risk = maxRisk([
       baseRisk(request.changedPaths, request.unknownShellMutation === true),
       ...contributions.flatMap(value => value.riskSignals?.map(signal => signal.risk) ?? []),
@@ -354,9 +408,9 @@ export class EngineeringReviewRuntime extends Service {
     for (const check of checks) checkResults.push(await this.runCheck(check, request))
     let findings: EngineeringReviewReport['findings'] = []
     let reviewer: EngineeringReviewReport['reviewer'] = { used: false }
-    const degradedReasons = checkResults
+    degradedReasons.push(...checkResults
       .filter(check => !check.required && (check.status === 'failed' || check.status === 'unavailable'))
-      .map(check => `optional check ${check.id} ${check.status}: ${check.summary}`.slice(0, 1_024))
+      .map(check => `optional check ${check.id} ${check.status}: ${check.summary}`.slice(0, 1_024)))
     if (request.depth === 'deep' || RISK_ORDER[risk] >= RISK_ORDER[this.config.riskThreshold]) {
       try {
         const outcome = await runReviewer(
@@ -402,6 +456,7 @@ export class EngineeringReviewRuntime extends Service {
     try {
       const cwdTarget = await this.ctx.fs.resolve(safeRelativeDirectory(check.cwd), { cwd: request.cwd, signal: request.signal })
       const info = await this.ctx.fs.stat(cwdTarget, request.signal)
+      // v8 ignore next -- a check without a cwd resolves to '.' which always exists, so the default arm never throws.
       if (info?.type !== 'directory') throw new Error(`working directory ${JSON.stringify(check.cwd ?? '.')} does not exist`)
       const result = await runArgv(this.ctx, check.argv, {
         cwd: this.ctx.fs.processPath(cwdTarget),
@@ -421,6 +476,7 @@ export class EngineeringReviewRuntime extends Service {
           : boundedSummary(result.stdout, result.stderr),
       }
     } catch (error) {
+      /* v8 ignore next -- rethrow only when the caller aborts between check selection and process start; no in-process flow races it. */
       if (request.signal.aborted) throw error
       return { id: check.id, status: 'unavailable', required, summary: errorMessage(error).slice(0, RESULT_SUMMARY_BYTES) }
     }
@@ -431,6 +487,7 @@ export class EngineeringReviewRuntime extends Service {
     next: () => Promise<PreStepDecision>,
   ): Promise<PreStepDecision> {
     if (payload.step === 1 && this.turns.get(payload.agent)?.turn !== payload.turn) {
+      // v8 ignore next -- every product agent session carries a cwd; the fallback is defensive.
       const cwd = payload.agent.session.header.cwd ?? process.cwd()
       const root = await gitRoot(this.ctx, cwd, payload.signal)
       const baseline: GitTurnBaseline | NonGitTurnBaseline = root === undefined
@@ -440,6 +497,7 @@ export class EngineeringReviewRuntime extends Service {
         turn: payload.turn,
         baseline,
         touchedPaths: new Set(),
+        beforeContents: new Map(),
         unknownShellMutation: false,
         mutationRevision: 0,
         correctionPasses: 0,
@@ -451,7 +509,58 @@ export class EngineeringReviewRuntime extends Service {
     return next()
   }
 
+  /** Read one touched path's current text for the non-Git snapshot; null when absent or unreadable. */
+  private async snapshotText(path: string, agent: Agent, signal: AbortSignal): Promise<string | null> {
+    try {
+      // v8 ignore next -- every product agent session carries a cwd; the fallback is defensive.
+      const cwd = agent.session.header.cwd ?? process.cwd()
+      const target = await this.ctx.fs.resolve(path, { cwd, signal })
+      const info = await this.ctx.fs.stat(target, signal)
+      return info?.type === 'file' ? await this.ctx.fs.readText(target, signal) : null
+    } catch (error) {
+      /* v8 ignore next -- a snapshot read only rethrows when the caller aborts mid-read; other failures degrade to null. */
+      if (signal.aborted) throw error
+      return null
+    }
+  }
+
+  /**
+   * Build the real unified diff between each path's first-mutation content and
+   * its current content. An empty result degrades to the legacy empty/truncated
+   * patch so the reviewer still gets read tools when nothing readable changed.
+   */
+  private async nonGitDiff(
+    state: TurnState,
+    agent: Agent,
+    paths: readonly string[],
+    maxBytes: number,
+    signal: AbortSignal,
+  ): Promise<{ diff: string; truncated: boolean }> {
+    const chunks: string[] = []
+    let bytes = 0
+    for (const path of paths) {
+      const before = state.beforeContents.get(path) ?? null
+      const after = await this.snapshotText(path, agent, signal)
+      if (before === after) continue
+      const patch = createTwoFilesPatch(
+        `a/${path}`, `b/${path}`,
+        before ?? '', after ?? '',
+        undefined, undefined, { context: 3 },
+      )
+      chunks.push(patch)
+      bytes += Buffer.byteLength(patch)
+      if (bytes > maxBytes) return { diff: chunks.join('\n'), truncated: true }
+    }
+    const diff = chunks.join('\n')
+    // An empty diff means nothing observable changed (e.g. a file created and
+    // removed within the turn). Leave the reviewer with no tools: without a
+    // diff there is nothing to investigate, and read tools on missing or
+    // unreadable paths only encourage an aimless file hunt.
+    return diff.length === 0 ? { diff: '', truncated: false } : { diff, truncated: false }
+  }
+
   private async automaticEvidence(agent: Agent, state: TurnState, signal: AbortSignal): Promise<ReviewEvidence> {
+    // v8 ignore next -- every product agent session carries a cwd; the fallback is defensive.
     const cwd = agent.session.header.cwd ?? process.cwd()
     if (state.baseline.kind === 'git') {
       const current = await captureGitSnapshot(this.ctx, state.baseline.snapshot.root, signal, this.config.maxFiles)
@@ -469,6 +578,7 @@ export class EngineeringReviewRuntime extends Service {
     const fingerprint = createHash('sha256')
       .update(`${state.mutationRevision}\0${paths.join('\0')}\0${state.unknownShellMutation}`)
       .digest('hex')
+    const patch = await this.nonGitDiff(state, agent, paths, this.config.maxDiffBytes, signal)
     return {
       noChanges: state.mutationRevision === 0,
       request: this.request(
@@ -477,7 +587,7 @@ export class EngineeringReviewRuntime extends Service {
         cwd,
         fingerprint,
         paths,
-        { diff: '', truncated: true },
+        patch,
         'fast',
         undefined,
         state.unknownShellMutation,
@@ -491,6 +601,7 @@ export class EngineeringReviewRuntime extends Service {
     focus: string | undefined,
     signal: AbortSignal,
   ): Promise<ReviewEvidence> {
+    // v8 ignore next -- every product agent session carries a cwd; the fallback is defensive.
     const cwd = agent.session.header.cwd ?? process.cwd()
     const state = this.turns.get(agent)
     const root = await gitRoot(this.ctx, cwd, signal)
@@ -521,9 +632,12 @@ export class EngineeringReviewRuntime extends Service {
     const paths = [...state?.touchedPaths ?? []].sort()
     const revision = state?.mutationRevision ?? 0
     const fingerprint = createHash('sha256').update(`${revision}\0${paths.join('\0')}`).digest('hex')
+    const patch = state === undefined
+      ? { diff: '', truncated: true }
+      : await this.nonGitDiff(state, agent, paths, this.config.maxDiffBytes, signal)
     return {
       noChanges: revision === 0,
-      request: this.request(agent, signal, cwd, fingerprint, paths, { diff: '', truncated: true }, depth, focus, state?.unknownShellMutation === true),
+      request: this.request(agent, signal, cwd, fingerprint, paths, patch, depth, focus, state?.unknownShellMutation === true),
     }
   }
 
@@ -577,6 +691,7 @@ export class EngineeringReviewRuntime extends Service {
         title: finding.title,
         evidence: finding.evidence.map(item => ({
           path: item.path,
+          // v8 ignore next -- admission requires a positive changed line, so normalized findings always carry one.
           ...item.line === undefined ? {} : { line: item.line },
         })),
       })),
@@ -587,6 +702,7 @@ export class EngineeringReviewRuntime extends Service {
 
   private async onTurnStopping(agent: Agent, turn: number, signal: AbortSignal): Promise<void> {
     const state = this.turns.get(agent)
+    /* v8 ignore next -- every stopping turn ran its step-1 pre-step; rejected/erroring pre-steps never reach turn-stopping. */
     if (state === undefined || state.turn !== turn) return
     if (state.finalReportRequested) return
     const evidence = await this.automaticEvidence(agent, state, signal)

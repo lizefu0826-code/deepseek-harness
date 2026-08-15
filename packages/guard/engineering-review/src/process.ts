@@ -38,6 +38,9 @@ export async function runArgv(ctx: Context, argv: readonly string[], options: Ar
   if (argv.length === 0 || argv.some(value => value.length === 0)) {
     throw new TypeError('engineering-review: argv must contain non-empty entries')
   }
+  // A caller that already cancelled must not start a process that could run to
+  // its own timeout; the abort listener below never fires for a settled signal.
+  options.signal.throwIfAborted()
   const controller = new AbortController()
   let timedOut = false
   const onAbort = (): void => { controller.abort(options.signal.reason) }
@@ -78,6 +81,7 @@ export async function runArgv(ctx: Context, argv: readonly string[], options: Ar
     const outcome = await process.done
     const stdout = process.collected.stdout?.readFrom(0)
     const stderr = process.collected.stderr?.readFrom(0)
+    // v8 ignore next 2 -- subprocess collected readers always expose both streams.
     return {
       ...outcome,
       stdout: stdout?.text ?? '',

@@ -10,6 +10,9 @@
         maxFiles: 100
         checkTimeoutMs: 120000
         subagentProvider: spawn
-        reviewerMaxTokens: 2048
+        # The package default (8192). A tighter cap made the reviewer exhaust
+        # its OUTPUT budget on large diffs and stop with "max-tokens" before
+        # emitting structured findings, degrading the gate to self-review.
+        reviewerMaxTokens: 8192
     - id: engineering-review-hardware
       name: '@deepseek-ai/dsh-engineering-review-hardware'

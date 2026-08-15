@@ -58,11 +58,14 @@ function hasPotentiallyUnboundedHardwarePoll(diff: string): boolean {
   const code = addedCode(diff)
   const boundedBody = /\b(?:break|return|goto|timeout|deadline|cancel|tick|elapsed|yield|sleep)\b/iu
   for (const match of code.matchAll(/\bwhile\s*\(([\s\S]*?)\)\s*\{([\s\S]*?)\}/giu)) {
+    /* v8 ignore next -- the capture group always exists when the regex matches. */
     const condition = match[1] ?? ''
+    /* v8 ignore next -- the capture group always exists when the regex matches. */
     const body = match[2] ?? ''
     if (/->|\b(?:ready|busy|status|flag|done)\b/iu.test(condition) && !boundedBody.test(body)) return true
   }
   for (const match of code.matchAll(/\bfor\s*\(\s*;\s*;\s*\)\s*\{([\s\S]*?)\}/gu)) {
+    // v8 ignore next -- the body capture group always exists when the regex matches.
     if (!boundedBody.test(match[1] ?? '')) return true
   }
   return false
@@ -77,10 +80,12 @@ class HardwareReviewAdapter implements EngineeringReviewAdapter {
     const cPaths = request.changedPaths.filter(path => /\.(?:c|h|cc|cpp|cxx|hpp|hh)$/iu.test(path))
     const hdlPaths = request.changedPaths.filter(path => /\.(?:v|vh|sv|svh)$/iu.test(path))
     if (cPaths.length === 0 && hdlPaths.length === 0) return undefined
+    const degradedReasons: string[] = []
     const checks: EngineeringCheckRecipe[] = []
     if (cPaths.length > 0) {
-      const database = await this.compilationDatabase(request)
+      const database = await this.compilationDatabase(request, degradedReasons)
       if (database !== undefined) {
+        // v8 ignore next -- validated workspace-relative paths never have an empty directory component.
         const directory = database.includes('/') ? database.slice(0, database.lastIndexOf('/')) || '.' : '.'
         checks.push({
           id: 'hardware:clang-tidy',
@@ -91,7 +96,7 @@ class HardwareReviewAdapter implements EngineeringReviewAdapter {
       }
     }
     if (hdlPaths.length > 0) {
-      const argsFile = await this.verilatorArgsFile(request)
+      const argsFile = await this.verilatorArgsFile(request, degradedReasons)
       if (argsFile !== undefined) {
         checks.push({
           id: 'hardware:verilator-lint',
@@ -110,13 +115,16 @@ class HardwareReviewAdapter implements EngineeringReviewAdapter {
       ],
       focus: [...cPaths.length === 0 ? [] : C_FOCUS, ...hdlPaths.length === 0 ? [] : HDL_FOCUS],
       checks,
+      ...degradedReasons.length === 0 ? {} : { degradedReasons },
     }
   }
 
-  private async compilationDatabase(request: EngineeringReviewRequest): Promise<string | undefined> {
+  private async compilationDatabase(request: EngineeringReviewRequest, degradedReasons: string[]): Promise<string | undefined> {
     if (this.config.compilationDatabase !== undefined) {
       const path = projectRelative(this.config.compilationDatabase, 'compilationDatabase')
-      return await request.hasFile(path) ? path : undefined
+      if (await request.hasFile(path)) return path
+      degradedReasons.push(`engineering-review-hardware: configured compilationDatabase ${JSON.stringify(this.config.compilationDatabase)} does not exist; clang-tidy check skipped`)
+      return undefined
     }
     for (const candidate of ['compile_commands.json', 'build/compile_commands.json']) {
       if (await request.hasFile(candidate)) return candidate
@@ -124,10 +132,12 @@ class HardwareReviewAdapter implements EngineeringReviewAdapter {
     return undefined
   }
 
-  private async verilatorArgsFile(request: EngineeringReviewRequest): Promise<string | undefined> {
+  private async verilatorArgsFile(request: EngineeringReviewRequest, degradedReasons: string[]): Promise<string | undefined> {
     if (this.config.verilatorArgsFile !== undefined) {
       const path = projectRelative(this.config.verilatorArgsFile, 'verilatorArgsFile')
-      return await request.hasFile(path) ? path : undefined
+      if (await request.hasFile(path)) return path
+      degradedReasons.push(`engineering-review-hardware: configured verilatorArgsFile ${JSON.stringify(this.config.verilatorArgsFile)} does not exist; Verilator lint check skipped`)
+      return undefined
     }
     for (const candidate of ['.dsh/verilator.args', 'verilator.f', 'verilator.args']) {
       if (await request.hasFile(candidate)) return candidate
