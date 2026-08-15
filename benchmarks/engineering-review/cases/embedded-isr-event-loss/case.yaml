@@ -1,0 +1,27 @@
+schemaVersion: 1
+id: embedded-isr-event-loss
+domain: embedded
+difficulty: standard
+riskTags: [interrupts, atomicity, lost-update]
+taskFile: task.md
+variants:
+  buggy:
+    patch: buggy.patch
+    expectedOracle: fail
+    expectedFindings: [isr-event-lost-update]
+  fixed:
+    patch: fixed.patch
+    expectedOracle: pass
+    forbiddenFindings: [isr-event-lost-update]
+gold:
+  - id: isr-event-lost-update
+    category: blocking-and-concurrency
+    path: event_counter.c
+    anchor: event_take_all
+    lineRange: [9, 15]
+    minimumSeverity: high
+oracle:
+  argv: [node, oracle/oracle.mjs]
+  timeoutMs: 5000
+  unavailableExitCode: 77
+  fixEligible: true

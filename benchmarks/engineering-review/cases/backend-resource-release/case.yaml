@@ -1,0 +1,27 @@
+schemaVersion: 1
+id: backend-resource-release
+domain: backend
+difficulty: standard
+riskTags: [resource-lifecycle, exception, cleanup]
+taskFile: task.md
+variants:
+  buggy:
+    patch: buggy.patch
+    expectedOracle: fail
+    expectedFindings: [exception-path-handle-leak]
+  fixed:
+    patch: fixed.patch
+    expectedOracle: pass
+    forbiddenFindings: [exception-path-handle-leak]
+gold:
+  - id: exception-path-handle-leak
+    category: resources-and-lifecycle
+    path: load_config.mjs
+    anchor: loadConfig
+    lineRange: [1, 10]
+    minimumSeverity: high
+oracle:
+  argv: [node, oracle/oracle.mjs]
+  timeoutMs: 5000
+  unavailableExitCode: 77
+  fixEligible: true

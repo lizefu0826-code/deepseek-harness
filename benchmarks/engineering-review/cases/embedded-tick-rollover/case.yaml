@@ -1,0 +1,27 @@
+schemaVersion: 1
+id: embedded-tick-rollover
+domain: embedded
+difficulty: standard
+riskTags: [timeout, integer-wraparound, boundary]
+taskFile: task.md
+variants:
+  buggy:
+    patch: buggy.patch
+    expectedOracle: fail
+    expectedFindings: [rollover-unsafe-deadline]
+  fixed:
+    patch: fixed.patch
+    expectedOracle: pass
+    forbiddenFindings: [rollover-unsafe-deadline, elapsed-subtraction-unsafe]
+gold:
+  - id: rollover-unsafe-deadline
+    category: boundaries-and-data-integrity
+    path: deadline.c
+    anchor: deadline_expired
+    lineRange: [3, 8]
+    minimumSeverity: high
+oracle:
+  argv: [node, oracle/oracle.mjs]
+  timeoutMs: 10000
+  unavailableExitCode: 77
+  fixEligible: true

@@ -1,0 +1,27 @@
+schemaVersion: 1
+id: backend-read-modify-write
+domain: backend
+difficulty: standard
+riskTags: [concurrency, atomicity, lost-update]
+taskFile: task.md
+variants:
+  buggy:
+    patch: buggy.patch
+    expectedOracle: fail
+    expectedFindings: [counter-lost-update]
+  fixed:
+    patch: fixed.patch
+    expectedOracle: pass
+    forbiddenFindings: [counter-lost-update]
+gold:
+  - id: counter-lost-update
+    category: blocking-and-concurrency
+    path: counter.mjs
+    anchor: incrementCounter
+    lineRange: [1, 8]
+    minimumSeverity: high
+oracle:
+  argv: [node, oracle/oracle.mjs]
+  timeoutMs: 5000
+  unavailableExitCode: 77
+  fixEligible: true

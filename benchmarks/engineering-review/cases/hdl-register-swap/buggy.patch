@@ -1,0 +1,18 @@
+diff --git a/register_swap.sv b/register_swap.sv
+--- a/register_swap.sv
++++ b/register_swap.sv
+@@ -6,5 +6,13 @@ module register_swap (
+   output logic [3:0] left,
+   output logic [3:0] right
+ );
+-  // Candidate implementation is applied by the benchmark runner.
++  always_ff @(posedge clk) begin
++    if (load) begin
++      left = left_in;
++      right = right_in;
++    end else begin
++      left = right;
++      right = left;
++    end
++  end
+ endmodule

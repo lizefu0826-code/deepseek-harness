@@ -1,0 +1,14 @@
+diff --git a/wide_sum.sv b/wide_sum.sv
+--- a/wide_sum.sv
++++ b/wide_sum.sv
+@@ -3,5 +3,9 @@ module wide_sum (
+   input  logic [7:0] b,
+   output logic [8:0] sum
+ );
+-  // Candidate implementation is applied by the benchmark runner.
++  function automatic logic [7:0] add8(input logic [7:0] left, input logic [7:0] right);
++    add8 = left + right;
++  endfunction
++
++  assign sum = add8(a, b);
+ endmodule

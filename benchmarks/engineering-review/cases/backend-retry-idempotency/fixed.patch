@@ -1,0 +1,13 @@
+diff --git a/charge.mjs b/charge.mjs
+--- a/charge.mjs
++++ b/charge.mjs
+@@ -1 +1,8 @@
+-// Candidate implementation is applied by the benchmark runner.
++export async function chargeWithRetry(client, order) {
++  const request = { amount: order.amount, idempotencyKey: `order-${order.id}` }
++  try {
++    return await client.createCharge(request)
++  } catch {
++    return client.createCharge(request)
++  }
++}
