@@ -3070,7 +3070,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EngineeringReviewContribution',
-    declaration: 'export interface EngineeringReviewContribution {\n    readonly riskSignals?: readonly EngineeringRiskSignal[];\n    readonly focus?: readonly string[];\n    readonly checks?: readonly EngineeringCheckRecipe[];\n}',
+    declaration: 'export interface EngineeringReviewContribution {\n    readonly riskSignals?: readonly EngineeringRiskSignal[];\n    readonly focus?: readonly string[];\n    readonly checks?: readonly EngineeringCheckRecipe[];\n    readonly degradedReasons?: readonly string[];\n}',
   },
   {
     name: 'EngineeringReviewDepth',
