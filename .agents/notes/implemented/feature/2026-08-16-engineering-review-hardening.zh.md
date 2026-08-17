@@ -25,12 +25,14 @@ Status: implemented
 - **max-tokens 重试**：以 `max-tokens` 停止且无结构化结果的 reviewer 用全新子代理重试一次——简洁作答指令、无工具、输出预算翻倍。
 - **非 Git 快照 diff**：每轮在文件首次变更时快照内容，审查时用 `createTwoFilesPatch` 生成真实 unified diff（覆盖新建/修改/删除/截断）；空 diff 不授予工具，reviewer 直接作答而不是搜寻文件。
 - **Web overlay**：`reviewerMaxTokens` 从 2048 提升到包默认值 8192。
+- **推理等级固定**：隔离 reviewer 子代理无论父会话的推理等级如何都以 `reasoningEffort: off` 运行。父会话以 high 推理等级运行时（例如 apiproxy 默认），会在最终消息之前把整个输出预算花在链式推理上，以 `max-tokens` 停止、无结构化 findings，且重试也失败（实测两次：两个 attempt 的 `reasoningTokens == outputTokens == maxTokens`）。reviewer 在其子代理上安装 `agent/request` waterfall 监听器，对每个请求都强制关闭推理等级——子代理的首次请求没有持久化 header，seed config 不带任何推理等级，否则 adapter 默认会胜出——使 JSON-only prompt 纪律在所有部署上足够。校准 CLI 本来就全局设为 off，所以它的批次从未触发此问题。
 
 ## 验证
 
 - 99/99 单元/集成测试，100% per-file 覆盖率（statements/branches/functions/lines），oxlint 干净，全工作区 typecheck 干净，keyless headless snapshot 场景通过。
 - 六 case 配对 A/B 校准（2026-08-15，每单元一次）：两种条件下最终结果 Recall 均为 6/6；treatment 的 False Block 0/6，control 3/6；treatment 在 retry 与 ISR 上的 finding precision 从 0.5 提升到 1。唯一一次门禁漏报（DMA 栈生命周期）被定位为 reviewer 没有应用任务声明的契约——该契约已在 prompt 中，属行为问题而非信息访问问题；见 [召回诊断笔记](2026-08-15-engineering-review-recall-diagnosis.md)。
 - 重启后的 GUI 实测：reviewer 调查从 21-31 步工具调用降到真实 diff 上的 1 步、先写后删轮次上的 2 步；零次 `max-tokens` 降级。
+- 2026-08-17：benchmark-report 变更（9 行 diff，可排除数据噪音膨胀）上又出现两次 `max-tokens` 降级，定位为父会话的 `reasoningEffort: high` 被子代理继承；usage 日志显示每个输出 token 都花在推理上。修复方式是在子代理请求上通过 `agent/request` waterfall 监听器固定 `reasoningEffort: off`；新增专门集成测试断言该固定。
 
 ## 后果
 

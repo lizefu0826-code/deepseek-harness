@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
@@ -359,6 +360,21 @@ async function startReviewer(
     },
     persona: 'You are an independent engineering reviewer. Do not edit files. Prefer precise evidence over speculative warnings.',
   })
+  // The reviewer must answer with the structured JSON directly. A parent that
+  // runs with high reasoning effort would spend the whole output budget on
+  // chain-of-thought before ever producing the final message (observed:
+  // reasoningTokens == outputTokens == maxTokens, no structured findings).
+  // The child's first request has no persisted header, so its seed config
+  // carries no reasoningEffort and the adapter default (high on the apiproxy
+  // route) would win; pin every request to off so the JSON-only prompt
+  // discipline is sufficient on all deployments.
+  const localAgent = run.localAgent
+  if (localAgent !== undefined) {
+    localAgent.ctx.on('agent/request', async (_payload, next) => {
+      const config = await next()
+      return { ...config, reasoningEffort: ReasoningEffortId('off') }
+    })
+  }
   try {
     return await run.result
   } finally {

@@ -25,12 +25,14 @@ The initial engineering quality gate ([quality-gate note](2026-08-15-engineering
 - **max-tokens retry**: a reviewer that stops with `max-tokens` and no structured findings is retried once with a fresh child, a concise-answer directive, no tools, and a doubled output budget.
 - **Non-Git snapshot diff**: file contents are snapshotted at first mutation each turn and diffed at review time (`createTwoFilesPatch`), so the reviewer receives a real unified diff covering create/edit/delete/truncation; an empty diff grants no tools so the reviewer answers directly instead of hunting files.
 - **Web overlay**: `reviewerMaxTokens` raised from 2048 to the package default 8192.
+- **Reasoning-effort pin**: the isolated reviewer child runs with `reasoningEffort: off` regardless of the parent session's effort. A parent running with high reasoning effort (e.g. the apiproxy default) spent the entire output budget on chain-of-thought before the final message, stopping at `max-tokens` with no structured findings and no successful retry (observed twice: `reasoningTokens == outputTokens == maxTokens` on both attempts). The reviewer installs an `agent/request` waterfall listener on its child that forces the effort off on every request — the child's first request has no persisted header, so its seed config carries no effort and the adapter default would otherwise win — keeping the JSON-only prompt discipline sufficient on every deployment. The calibration CLI had already set the global effort to off, which is why its runs never hit this.
 
 ## Verification
 
 - 99/99 unit/integration tests, 100% per-file coverage (statements/branches/functions/lines), oxlint clean, full-workspace typecheck clean, and the keyless headless snapshot scenario passes.
 - Six-case paired A/B calibration (2026-08-15, one run per cell): final outcome Recall 6/6 in both conditions; treatment False Block 0/6 versus control 3/6; treatment finding precision rose from 0.5 to 1 on the retry and ISR cases. The single gate miss (DMA stack-lifetime) was traced to the reviewer not applying a task-declared contract that was already in its prompt — a behavior issue, not information access; see the [recall diagnosis note](2026-08-15-engineering-review-recall-diagnosis.md).
 - Live GUI verification after restart: reviewer investigation dropped from 21-31 tool steps to 1 step on real diffs and 2 steps on create-then-delete turns; zero `max-tokens` degradations.
+- 2026-08-17: two further `max-tokens` degradations on the benchmark-report change (a 9-line diff, ruling out data-noise bloat) traced to the parent session's `reasoningEffort: high` inherited by the reviewer child; usage logs show every output token spent on reasoning. Fixed by pinning the child's requests to `reasoningEffort: off` via an `agent/request` waterfall listener; a dedicated integration test asserts the pin.
 
 ## Consequences
 

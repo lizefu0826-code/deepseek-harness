@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, CallId } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -43,6 +44,7 @@ class StructuredReviewer implements SubagentProvider {
     }],
     private readonly stopReason: 'completed' | 'error' = 'completed',
     private readonly firstStopsMaxTokens = false,
+    private readonly localAgent?: Agent,
   ) {}
   start(request: ResolvedSubagentStartRequest) {
     this.starts += 1
@@ -51,7 +53,7 @@ class StructuredReviewer implements SubagentProvider {
     const stopReason: SubagentStopReason = truncated ? 'max-tokens' : this.stopReason
     return Promise.resolve({
       id: SessionId('engineering-review-child'),
-      localAgent: undefined,
+      localAgent: this.localAgent,
       result: Promise.resolve({
         stopReason,
         output: [],
@@ -1157,6 +1159,57 @@ describe('automatic engineering review gate', () => {
     const results = agent.session.events.filter(event => event.type === 'engineering-review/result')
     expect(results).toHaveLength(1)
     expect(results[0]?.data).toMatchObject({ passed: true, risk: 'low' })
+    await ctx.fiber.dispose()
+  })
+
+  it('pins the reviewer child requests to reasoning effort off', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'dsh-engineering-review-effort-'))
+    temporaryDirectories.push(workspace)
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(LocalFileSystem, { cwd: workspace })
+    await ctx.plugin(LocalSubprocessRuntime)
+    await ctx.plugin(SkillRuntime)
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(EngineeringReviewRuntime)
+    // Capture the agent/request waterfall listener the reviewer installs on its
+    // child so the test can assert the pinned reasoning effort.
+    const requestListeners: Array<
+      (payload: unknown, next: () => Promise<Record<string, unknown>>) => Promise<Record<string, unknown>>
+    > = []
+    const localAgent = {
+      ctx: {
+        on(name: string, listener: (payload: unknown, next: () => Promise<Record<string, unknown>>) => Promise<Record<string, unknown>>) {
+          if (name === 'agent/request') requestListeners.push(listener)
+          return () => undefined
+        },
+      },
+    } as unknown as Agent
+    const reviewer = new StructuredReviewer([], 'completed', false, localAgent)
+    ctx.subagents.registerProvider(reviewer)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'write', description: 'test write', parameters: { path: { type: 'string', required: true } },
+      async execute() { return [{ type: 'text', text: 'written' }] },
+    }))
+    const llm = new MockAdapter([
+      toolCallResponse(CallId('effort-write'), 'write', { path: 'driver.c' }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], llm)
+    const agent = ctx.agentLoop.create(SessionId('engineering-effort'), { provider: 'mock', model: 'mock' }, { cwd: workspace })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'change the driver' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(requestListeners).toHaveLength(1)
+    const requestListener = requestListeners[0]
+    expect(requestListener).toBeDefined()
+    const config = await requestListener!({}, async () => ({ provider: 'mock', model: 'mock', reasoningEffort: 'high' }))
+    expect(config.reasoningEffort).toBe('off')
+    // The first child request has no persisted header, so the effort would be
+    // undefined and the adapter default would win; the pin must apply there too.
+    const plain = await requestListener!({}, async () => ({ provider: 'mock', model: 'mock' }))
+    expect(plain.reasoningEffort).toBe('off')
     await ctx.fiber.dispose()
   })
 })
