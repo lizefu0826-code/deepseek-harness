@@ -5,7 +5,7 @@ Generated from calibration artifacts under `.artifacts/engineering-review-bench/
 
 ## Experiment configuration
 
-- **Headline batch:** 28 cells across 14 runs on harness revision `23bbce1d` (6 unique cases)
+- **Headline batch:** 28 cells across 7 runs on harness revision `23bbce1d` (6 unique cases)
 - **Model:** deepseek-official/deepseek-v4-flash
 - **Reasoning effort:** off; **root output cap:** 8192; **reviewer output cap:** 3072; **risk threshold:** medium
 - **Task mode:** review (detection only — the candidate is never repaired; Repair Success is deliberately not measured here)

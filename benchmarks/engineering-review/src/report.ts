@@ -265,6 +265,7 @@ function renderReport(headline: BenchmarkRecord[]): string {
     return { caseId, difficulty: cells[0]?.difficulty, control: by('control'), treatment: by('treatment') }
   }).sort((a, b) => a.caseId.localeCompare(b.caseId))
   const models = [...new Set(headline.map(record => `${record.provider}/${record.model}`))].join(', ')
+  const headlineRuns = new Set(headline.map(record => record.runId)).size
   const missed = headline.filter(record => record.gateBugRecall === 0).map(record => record.caseId)
   const latencyDelta = treatment.medianDurationMs !== null && control.medianDurationMs !== null
     ? treatment.medianDurationMs - control.medianDurationMs
@@ -277,7 +278,7 @@ Generated from calibration artifacts under \`.artifacts/engineering-review-bench
 
 ## Experiment configuration
 
-- **Headline batch:** ${headline.length} cells across ${control.runs + treatment.runs} runs on harness revision \`${headline[0]?.harnessRevision?.slice(0, 8) ?? 'n/a'}\` (${new Set(headline.map(r => r.caseId)).size} unique cases)
+- **Headline batch:** ${headline.length} cells across ${headlineRuns} runs on harness revision \`${headline[0]?.harnessRevision?.slice(0, 8) ?? 'n/a'}\` (${new Set(headline.map(r => r.caseId)).size} unique cases)
 - **Model:** ${models}
 - **Reasoning effort:** ${CALIBRATION_CONFIG.reasoningEffort}; **root output cap:** ${CALIBRATION_CONFIG.rootMaxTokens}; **reviewer output cap:** ${CALIBRATION_CONFIG.reviewerMaxTokens}; **risk threshold:** ${CALIBRATION_CONFIG.riskThreshold}
 - **Task mode:** ${CALIBRATION_CONFIG.taskMode} (detection only — the candidate is never repaired; Repair Success is deliberately not measured here)
@@ -401,10 +402,14 @@ export async function generateReport(
   }
 
   const headline = records.filter(record => record.headlineBatch)
+  // Deterministic as-of timestamp: derived from the artifact data (the latest
+  // run in the batch), never the wall clock, so regeneration is byte-stable
+  // and the committed results.json only changes when the data changes.
+  const dataTimestamp = records.reduce((latest, record) => (record.timestamp > latest ? record.timestamp : latest), '')
   await mkdir(outputDir, { recursive: true })
   await writeFile(join(outputDir, 'results.csv'), toCsv(records))
   await writeFile(join(outputDir, 'results.json'), `${JSON.stringify({
-    meta: { generatedAt: new Date().toISOString(), headlineRevision: HEADLINE_REVISION, calibrationConfig: CALIBRATION_CONFIG },
+    meta: { dataTimestamp, headlineRevision: HEADLINE_REVISION, calibrationConfig: CALIBRATION_CONFIG },
     records,
     headline: headline.length === 0 ? undefined : {
       aggregate: { control: aggregate(headline.filter(r => r.condition === 'control')), treatment: aggregate(headline.filter(r => r.condition === 'treatment')) },
