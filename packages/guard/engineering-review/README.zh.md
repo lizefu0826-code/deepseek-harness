@@ -22,6 +22,7 @@
     checkTimeoutMs: 120000
     subagentProvider: spawn
     reviewerMaxTokens: 8192
+    maxReviewContextBytes: 131072
 ```
 
 本包会注册 `ctx.engineeringReview`、`engineering_review` 工具和 `engineering-review` skill。项目级 `.dsh/skills/engineering-review` 会按正常的 skill 优先级覆盖内置 skill。详细 rubric 保留在包内的 skill reference 中，并直接提供给隔离 reviewer。
@@ -38,7 +39,7 @@
 
 warning 不会阻止结束。必需检查失败或不可用，或者 reviewer 给出 critical/high 且高置信度的发现，才形成 blocker。可选分析器故障属于非阻塞降级：运行时会明确要求主 agent 完成一次基于 rubric 的自审。reviewer 在输出结构化结果前耗尽输出预算时，会用简洁作答指令、无工具、预算翻倍的子代理重试一次；只有再次失败才降级为自审 steering。blocker 会被送回同一个 agent 修正。达到 `maxCorrectionPasses` 后，运行时只再要求一次最终证据报告，并允许下一个停止边界正常结束，从而避免无限循环。把修正预算设为零会启用只报告行为：首个 blocker 会直接请求最终报告，不会授权修复轮次。
 
-独立 reviewer 是一个全新的 one-shot 子 agent，不继承父会话的推理历史。它接收最近一条直接用户任务中最多 16 KiB 的文本，以及受限的变更证据、检查结果、项目指令、最终生效的 skill 和 rubric；agent 输出和插件 steering 不会进入任务投影。prompt 要求最终消息必须是纯结构化 JSON 对象、不得有散文，文件检查仅限于验证具体候选。diff 完整的 fast 审查没有导航工具；deep 审查、diff 截断或 diff 缺失时才允许使用部署中已有的只读文件、图片、LSP 与 Git 导航工具。reviewer 不能调用写入、编辑、shell、terminal、部署或自动修复工具。即使父级路由的 provider 默认值更大，`reviewerMaxTokens` 也会约束每次子请求。
+独立 reviewer 是一个全新的 one-shot 子 agent，不继承父会话的推理历史。它接收最近一条直接用户任务中最多 16 KiB 的文本，以及受限的变更证据、检查结果、项目指令、最终生效的 skill 和 rubric；agent 输出和插件 steering 不会进入任务投影。prompt 要求最终消息必须是纯结构化 JSON 对象、不得有散文，文件检查仅限于验证具体候选。diff 完整的 fast 审查没有导航工具；自动门禁对完整 diff 中的普通单行变更保持 checks-only，只有有实质变更的中风险才使用 fast；deep 审查、diff 截断或 diff 缺失时才允许使用部署中已有的只读文件、图片、LSP 与 Git 导航工具。reviewer 不能调用写入、编辑、shell、terminal、部署或自动修复工具。即使父级路由的 provider 默认值更大，`reviewerMaxTokens` 也会约束每次子请求。
 
 运行时只接纳高置信度、critical/high 且至少引用一个落在变更 diff hunk 内的变更文件行的 candidate（行级接纳；diff 截断或缺失时回退到文件级接纳）。较低置信度 candidate、low/medium 建议、诊断偏好、API 风格建议、可选加固以及只有变更范围外证据的 candidate 都不会进入报告。结构化 schema 把类别限制在稳定的工程分类中，覆盖并发、生命周期、恢复、数据完整性、实时行为、状态与兼容性、安全、验证，以及 HDL 专用的时钟／复位／CDC 和位宽／时序语义。接纳的 finding 还包含置信度、文件和行证据、影响、修复建议与验证方法；运行时生成稳定 id，并把每个接纳的 candidate 映射为 blocker。
 

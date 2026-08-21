@@ -9,6 +9,9 @@ export type EngineeringRisk = 'low' | 'medium' | 'high'
 /** Manual review depth. Deep review always requests an independent reviewer. */
 export type EngineeringReviewDepth = 'fast' | 'deep'
 
+/** Runtime route selected after deterministic checks have completed. */
+export type EngineeringReviewRoute = 'checks-only' | 'fast' | 'deep'
+
 /** One exact-argv deterministic project check. */
 export interface EngineeringCheckRecipe {
   /** Stable id within the assembled review. */
@@ -51,6 +54,8 @@ export interface EngineeringReviewRequest {
   readonly diffTruncated: boolean
   /** Bounded text from the latest direct user task; excludes agent reasoning and plugin steering. */
   readonly taskContext?: string
+  /** True when the request came from the automatic stopping gate. */
+  readonly automatic?: boolean
   readonly depth: EngineeringReviewDepth
   readonly focus?: readonly string[]
   readonly unknownShellMutation?: boolean
@@ -115,6 +120,8 @@ export interface EngineeringReviewerResult {
 export interface EngineeringReviewReport {
   readonly fingerprint: string
   readonly risk: EngineeringRisk
+  /** The effective route; checks-only means no independent reviewer ran. */
+  readonly route: EngineeringReviewRoute
   readonly passed: boolean
   readonly checks: readonly EngineeringCheckResult[]
   readonly findings: readonly EngineeringFinding[]
@@ -127,6 +134,8 @@ export interface EngineeringReviewReport {
 export interface EngineeringReviewLogData {
   readonly fingerprint: string
   readonly risk: EngineeringRisk
+  /** The effective route; checks-only means no independent reviewer ran. */
+  readonly route: EngineeringReviewRoute
   readonly passed: boolean
   readonly checks: readonly { id: string; status: EngineeringCheckResult['status']; required: boolean }[]
   readonly findings: readonly {

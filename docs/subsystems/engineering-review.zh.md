@@ -12,7 +12,7 @@ Service Definition 为 [`@deepseek-ai/dsh-engineering-review`](../../packages/gu
 
 每轮首次 pre-step 时，服务会捕获 Git 对象标识基线，或启动一个非 Git 窗口，快照每个被触碰文件在首次变更前的内容。停止边界会生成变更路径、受限 diff（非 Git 轮次为基于内容快照生成的真实 unified diff）和 fingerprint。没有变化就不审查；已经审查的 fingerprint 会复用结果；后续修改会改变 fingerprint 并重新进入流水线。
 
-引擎会加载版本化项目检查，或者只发现已有的标准脚本，然后合并适配器贡献，并在已挂载的子进程沙箱中运行适用的精确 argv 检查。风险达到配置阈值时，会启动全新的结构化 reviewer。手动 `deep` 总会启动 reviewer；`fast` 遵循风险阈值。只有高置信度 critical/high finding 才会进入结果并阻止结束；必需检查失败同样会阻止，而 warning 不会。
+引擎会加载版本化项目检查，或者只发现已有的标准脚本，然后合并适配器贡献，并在已挂载的子进程沙箱中运行适用的精确 argv 检查。引擎先运行确定性检查，再选择 `checks-only`、`fast` 或 `deep`。低风险只做检查；达到阈值的中风险使用精简 fast reviewer；高风险、未知 shell 范围或证据截断进入 deep。必需检查失败会短路 reviewer 调度但仍阻止结束。手动 `deep` 在检查之后启动 reviewer；warning 不阻止结束。
 
 ```text
 pre-step baseline
@@ -31,7 +31,7 @@ Git 检查会禁用 optional lock、external diff 和 text conversion，并在�
 
 项目检查是只包含数据的精确 argv。运行时拒绝直接命令 shell、依赖安装、自动修复参数、迁移、部署、重复 id 与工作区相对路径逃逸。它绝不会安装依赖、创建构建元数据或要求分析器改写代码。检查在已有沙箱权限内运行，不会自动申请更宽权限。
 
-one-shot reviewer 只接收最近一条直接用户任务中最多 16 KiB 的文本投影、路径、受限 diff、检查结果、项目指令、skill 流程、rubric 与 focus；父 agent 输出与插件 steering 均不会进入请求。prompt 要求最终消息必须是纯结构化 JSON 对象、不得有散文，文件检查仅限于验证具体候选。diff 完整的 fast 审查没有导航工具；deep 审查、diff 截断或 diff 缺失时，才允许使用部署中已有的只读文件／图片、LSP 与 Git 导航工具。结构化 schema 要求从共享的稳定工程分类中选择类别。父运行时只接纳高置信度、critical/high 且引用行落在变更 diff hunk 内的 candidate（行级接纳；diff 截断或缺失时回退到文件级接纳），生成 finding id，并把每个接纳的 finding 映射为 blocker；较低置信度 candidate 会被省略，而不是变成 warning。
+one-shot reviewer 只接收最近一条直接用户任务中最多 16 KiB 的文本投影、路径、受限 diff、检查结果、项目指令、skill 流程、rubric 与 focus；prompt 有可配置的 `maxReviewContextBytes` 总预算（默认 128 KiB）；fast review 不携带完整 skill 和 rubric。父 agent 输出与插件 steering 均不会进入请求。prompt 要求最终消息必须是纯结构化 JSON 对象、不得有散文，文件检查仅限于验证具体候选。diff 完整的 fast 审查没有导航工具；deep 审查、diff 截断或 diff 缺失时，才允许使用部署中已有的只读文件／图片、LSP 与 Git 导航工具。结构化 schema 要求从共享的稳定工程分类中选择类别。父运行时只接纳高置信度、critical/high 且引用行落在变更 diff hunk 内的 candidate（行级接纳；diff 截断或缺失时回退到文件级接纳），生成 finding id，并把每个接纳的 finding 映射为 blocker；较低置信度 candidate 会被省略，而不是变成 warning。
 
 ## 适配器约定
 
@@ -75,5 +75,5 @@ registerAdapter(adapter: EngineeringReviewAdapter): () => void
 review(request: EngineeringReviewRequest): Promise<EngineeringReviewReport>
 ```
 
-Source: [`packages/guard/engineering-review/src/index.ts:238`](../../packages/guard/engineering-review/src/index.ts)
+Source: [`packages/guard/engineering-review/src/index.ts:275`](../../packages/guard/engineering-review/src/index.ts)
 <!-- END GENERATED cordis-surface -->

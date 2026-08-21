@@ -54,6 +54,14 @@ function addedCode(diff: string): string {
     .join('\n')
 }
 
+function hasHighRiskHdl(paths: readonly string[], diff: string): boolean {
+  const pathHint = paths.some(path => /(?:cdc|clock|reset|fifo|handshake|axi|bus)/iu.test(path))
+  const hdlCode = addedCode(diff)
+  const codeHint = /\b(?:always_ff|always @(?:posedge|negedge)|posedge|negedge|crossing|synchronizer)\b/iu.test(hdlCode)
+    || /\b(?:reset|handshake|backpressure)\b/iu.test(hdlCode)
+  return pathHint || codeHint
+}
+
 function hasPotentiallyUnboundedHardwarePoll(diff: string): boolean {
   const code = addedCode(diff)
   const boundedBody = /\b(?:break|return|goto|timeout|deadline|cancel|tick|elapsed|yield|sleep)\b/iu
@@ -111,7 +119,9 @@ class HardwareReviewAdapter implements EngineeringReviewAdapter {
         ...cPaths.length === 0 ? [] : [hasPotentiallyUnboundedHardwarePoll(request.diff)
           ? { risk: 'high' as const, reason: 'Changed C/C++ control flow may poll hardware state without an observable bound.' }
           : { risk: 'medium' as const, reason: 'C/C++ changes can couple blocking, memory, interrupt, and hardware-resource behavior.' }],
-        ...hdlPaths.length === 0 ? [] : [{ risk: 'high' as const, reason: 'HDL changes can alter clock, reset, handshake, width, synthesis, and timing behavior.' }],
+        ...hdlPaths.length === 0 ? [] : [hasHighRiskHdl(hdlPaths, request.diff)
+          ? { risk: 'high' as const, reason: 'HDL changes can alter clock, reset, handshake, width, synthesis, and timing behavior.' }
+          : { risk: 'low' as const, reason: 'HDL change has no clock/reset/CDC or interface-risk signal; deterministic checks still apply.' }],
       ],
       focus: [...cPaths.length === 0 ? [] : C_FOCUS, ...hdlPaths.length === 0 ? [] : HDL_FOCUS],
       checks,

@@ -614,13 +614,15 @@ export interface Config {
   readonly reviewerModel?: string
   /** Maximum output tokens for each isolated reviewer request (default 8192). */
   readonly reviewerMaxTokens?: number
+  /** Maximum UTF-8 bytes in one isolated reviewer prompt (default 128 KiB). */
+  readonly maxReviewContextBytes?: number
 }
 
 /** Ordered engineering risk used by adapters and review policy. */
 export type EngineeringRisk = 'low' | 'medium' | 'high'
 ```
 
-Source: [`packages/guard/engineering-review/src/index.ts:76`](../packages/guard/engineering-review/src/index.ts)
+Source: [`packages/guard/engineering-review/src/index.ts:84`](../packages/guard/engineering-review/src/index.ts)
 
 <a id="deepseek-aidsh-engineering-review-hardware"></a>
 

@@ -223,7 +223,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime, { reviewerMaxTokens: 2_048 })
+    await ctx.plugin(EngineeringReviewRuntime, { reviewerMaxTokens: 2_048, maxReviewContextBytes: 2_048 })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
@@ -247,7 +247,12 @@ describe('automatic engineering review gate', () => {
       provider: 'mock',
       model: 'mock',
       maxTokens: 2_048,
+      reasoningEffort: 'off',
     })
+    const promptBlock = reviewer.lastRequest?.prompt[0]
+    expect(promptBlock?.type).toBe('text')
+    if (promptBlock?.type !== 'text') throw new Error('reviewer prompt must be text')
+    expect(Buffer.byteLength(promptBlock.text)).toBeLessThanOrEqual(2_048)
     // The automatic review of the fake write has no readable change, so it
     // gets no tools; the manual reviews below pin the fast/deep tool split.
     expect(reviewer.lastRequest?.toolFilter).toEqual({ allow: [] })
@@ -476,7 +481,7 @@ describe('automatic engineering review gate', () => {
     ctx.tools.register(defineContentToolFixture({
       name: 'write', description: 'test write', parameters: { path: { type: 'string', required: true } },
       async execute(args) {
-        await writeFile(join(workspace, args.path), 'int changed(void) { return 1; }\n')
+        await writeFile(join(workspace, args.path), 'int changed(void) { return 1; }\nvoid helper(void) { return 0; }\n')
         return [{ type: 'text', text: 'written' }]
       },
     }))
@@ -501,7 +506,7 @@ describe('automatic engineering review gate', () => {
   it('diffs the full turn change from first-mutation content', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'dsh-engineering-review-diff-full-'))
     temporaryDirectories.push(workspace)
-    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\n', 'utf8')
+    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\nvoid helper(void) { return 0; }\n', 'utf8')
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(LocalFileSystem, { cwd: workspace })
@@ -515,14 +520,14 @@ describe('automatic engineering review gate', () => {
     ctx.tools.register(defineContentToolFixture({
       name: 'write', description: 'test write', parameters: { path: { type: 'string', required: true } },
       async execute(args) {
-        await writeFile(join(workspace, args.path), 'int v1(void) { return 1; }\n')
+        await writeFile(join(workspace, args.path), 'int v1(void) { return 1; }\nvoid helper(void) { return 0; }\n')
         return [{ type: 'text', text: 'written' }]
       },
     }))
     ctx.tools.register(defineContentToolFixture({
       name: 'edit', description: 'test edit', parameters: { path: { type: 'string', required: true } },
       async execute(args) {
-        await writeFile(join(workspace, args.path), 'int v2(void) { return 2; }\n')
+        await writeFile(join(workspace, args.path), 'int v2(void) { return 2; }\nvoid helper(void) { return 2; }\n')
         return [{ type: 'text', text: 'edited' }]
       },
     }))
@@ -548,7 +553,7 @@ describe('automatic engineering review gate', () => {
   it('diffs a deletion to nothing in non-Git reviews', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'dsh-engineering-review-diff-del-'))
     temporaryDirectories.push(workspace)
-    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\n', 'utf8')
+    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\nvoid helper(void) { return 0; }\n', 'utf8')
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(LocalFileSystem, { cwd: workspace })
