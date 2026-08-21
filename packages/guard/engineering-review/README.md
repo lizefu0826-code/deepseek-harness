@@ -8,7 +8,7 @@ An opt-in engineering quality gate for DeepSeek Harness. It records the current 
 
 ## Composition
 
-Mount the service after the agent, filesystem, subprocess, skill, tool, and subagent services. The default reviewer provider is the fresh one-shot `spawn` backend; the reviewer inherits the parent agent's LLM provider and model unless `reviewerProvider` or `reviewerModel` is configured. Each reviewer request has an independent `reviewerMaxTokens` output cap, defaulting to 8192.
+Mount the service after the agent, filesystem, subprocess, skill, tool, and subagent services. The default reviewer provider is the fresh one-shot `spawn` backend; the reviewer inherits the parent agent's LLM provider and model unless `reviewerProvider` or `reviewerModel` is configured. Each reviewer request has an independent `reviewerMaxTokens` output cap, defaulting to 8192, and a total `maxReviewContextBytes` input budget, defaulting to 128 KiB.
 
 ```yaml
 - id: engineering-review
@@ -22,6 +22,7 @@ Mount the service after the agent, filesystem, subprocess, skill, tool, and suba
     checkTimeoutMs: 120000
     subagentProvider: spawn
     reviewerMaxTokens: 8192
+    maxReviewContextBytes: 131072
 ```
 
 The package registers `ctx.engineeringReview`, the `engineering_review` tool, and the `engineering-review` skill. A project-level `.dsh/skills/engineering-review` overrides the bundled skill through the normal skill precedence rules. The detailed rubric remains a package-owned skill reference and is supplied directly to the isolated reviewer.
@@ -38,8 +39,7 @@ Explicit `.dsh/engineering-review.yml` checks take precedence over conservative 
 
 Warnings do not prevent completion. A required check that fails or is unavailable, or a reviewer finding whose source severity is critical/high with high confidence, becomes a blocker. Optional analyzer failures and reviewer failures are non-blocking degradation: the runtime explicitly steers one rubric-based self-review to the main agent. Blockers steer correction back to the same agent. After `maxCorrectionPasses`, the runtime requests one final evidence report and allows the next stopping boundary to finish, preventing an infinite loop. Setting the correction budget to zero selects report-only behavior: the first blocker requests the final report without authorizing a repair pass.
 
-The independent reviewer is a fresh one-shot child with no inherited conversation reasoning. It receives at most 16 KiB of text from the latest direct user task, plus bounded change evidence, checks, project instructions, the winning skill, and the rubric. Agent output and plugin steering are excluded from the task projection. A fast review with a complete diff gets no navigation tools; deep review or a truncated diff may use available read-only file, image, LSP, and Git navigation tools. The reviewer cannot invoke write, edit, shell, terminal, deployment, or automatic-fix tools. `reviewerMaxTokens` bounds each child request even when the parent route has a larger provider default.
-
+The independent reviewer is a fresh one-shot child with no inherited conversation reasoning. It receives at most 16 KiB of text from the latest direct user task, plus bounded change evidence, checks, project instructions, the winning skill, and the rubric. Agent output and plugin steering are excluded from the task projection. The prompt requires the final message to be exactly the structured JSON object with no prose, and file inspection is limited to verifying a specific candidate. The automatic gate runs deterministic checks first, then selects `checks-only`, `fast`, or `deep`: low risk stays checks-only, a complete single-line ordinary edit stays checks-only, medium risk uses a compact fast prompt for substantive changes, and high risk, unknown shell scope, or truncated evidence uses deep. A required check failure is reported without dispatching a reviewer. Fast review with a complete diff gets no navigation tools; deep review uses available read-only file, image, LSP, and Git navigation tools. The reviewer cannot invoke write, edit, shell, terminal, deployment, or automatic-fix tools. `reviewerMaxTokens` bounds each child request even when the parent route has a larger provider default.
 The runtime admits only high-confidence critical/high candidates that cite at least one changed file line. Lower-confidence candidates, low/medium advice, diagnostics preferences, API-style suggestions, optional hardening, and candidates evidenced only outside the change do not enter the report. The structured schema limits category to a stable engineering taxonomy covering concurrency, lifecycle, recovery, data integrity, real-time behavior, state and compatibility, safety, verification, and HDL-specific clock/reset/CDC and width/sequential semantics. Admitted findings also carry confidence, file and line evidence, impact, recommendation, and validation; the runtime generates stable ids and maps every admitted candidate to a blocker.
 
 ## Project checks

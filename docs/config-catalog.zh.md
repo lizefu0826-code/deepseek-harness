@@ -616,6 +616,8 @@ export interface Config {
   readonly reviewerModel?: string
   /** Maximum output tokens for each isolated reviewer request (default 8192). */
   readonly reviewerMaxTokens?: number
+  /** Maximum UTF-8 bytes in one isolated reviewer prompt (default 128 KiB). */
+  readonly maxReviewContextBytes?: number
 }
 
 /** Ordered engineering risk used by adapters and review policy. */

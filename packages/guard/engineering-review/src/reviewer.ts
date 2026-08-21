@@ -10,6 +10,7 @@ import type {
   EngineeringCheckResult,
   EngineeringFinding,
   EngineeringReviewRequest,
+  EngineeringReviewRoute,
 } from './types.ts'
 import { REVIEW_CATEGORIES, type EngineeringFindingCategory } from './categories.ts'
 
@@ -228,6 +229,20 @@ export function admitReviewerFinding(
   })
 }
 
+const FAST_RUBRIC = 'Check only high-confidence critical/high defects in the changed lines: progress and blocking, ownership and cleanup, timeout/recovery, bounds and data integrity, state consistency, compatibility, safety, observability, and verification. Do not infer undocumented requirements.'
+
+function boundedUtf8(text: string, maxBytes: number): string {
+  const bytes = Buffer.from(text)
+  if (bytes.length <= maxBytes) return text
+  const marker = text.includes('[task context truncated]')
+    ? '\n[task context truncated]'
+    : '\n[review context truncated]'
+  const markerBytes = Buffer.from(marker)
+  if (maxBytes <= markerBytes.length) return markerBytes.subarray(0, maxBytes).toString('utf8')
+  const end = maxBytes - markerBytes.length
+  return `${bytes.subarray(0, end).toString('utf8')}${marker}`
+}
+
 function reviewerPrompt(
   request: EngineeringReviewRequest,
   checks: readonly EngineeringCheckResult[],
@@ -235,47 +250,60 @@ function reviewerPrompt(
   skill: string,
   rubric: string,
   projectInstructions: string | undefined,
+  route: EngineeringReviewRoute,
+  maxContextBytes: number,
 ): string {
-  return [
+  const deep = route === 'deep'
+  const header = [
     'Review the engineering change independently. Return only critical/high correctness defects introduced or exposed by the change.',
     'Every finding must identify a violated task, project, interface, or execution requirement and cite at least one changed file line. Omit diagnostics preferences, API-style suggestions, optional hardening, and speculative concerns.',
     'Return a candidate only at high confidence. If confidence is medium or low, omit it instead of returning a warning.',
-    'Answer directly: your final message must be exactly the requested JSON object, with no prose before or after it. Inspect files only when needed to verify a specific candidate, never to narrate or audit the workspace.',
+    'Answer directly: your final message must be exactly the requested JSON object, with no prose before or after it.',
+    deep ? 'Inspect files only when needed to verify a specific candidate. Do not modify files.' : 'Do not inspect files or use tools; the complete bounded diff is the evidence. Do not modify files.',
     `Choose each finding category from this stable list: ${REVIEW_CATEGORIES.join(', ')}.`,
-    'Do not modify files. Return the requested structured object.',
-    `Changed paths:\n${request.changedPaths.join('\n')}`,
-    `Review focus:\n${focus.join('\n') || '(general engineering review)'}`,
-    `Deterministic checks:\n${JSON.stringify(checks)}`,
-    `User task requirements:\n${request.taskContext ?? '(not available)'}`,
-    `Project instructions:\n${projectInstructions ?? '(none found)'}`,
-    `Review workflow:\n${skill}`,
-    `Rubric:\n${rubric}`,
-    `Bounded diff${request.diffTruncated ? ' (truncated; inspect files as needed)' : ''}:\n${request.diff || '(no textual diff available)'}`,
-  ].join('\n\n')
+    `Changed paths:\n${boundedUtf8(request.changedPaths.join('\n'), Math.min(8_192, maxContextBytes >> 3))}`,
+    `Review focus:\n${boundedUtf8(focus.join('\n') || '(general engineering review)', Math.min(8_192, maxContextBytes >> 3))}`,
+    `Deterministic checks:\n${boundedUtf8(JSON.stringify(checks), Math.min(12_288, maxContextBytes >> 2))}`,
+    `User task requirements:\n${boundedUtf8(request.taskContext ?? '(not available)', Math.min(16_384, maxContextBytes >> 2))}`,
+  ]
+  if (deep) {
+    header.push(`Project instructions:\n${boundedUtf8(projectInstructions ?? '(none found)', 16_384)}`)
+    header.push(`Review workflow:\n${boundedUtf8(skill, 16_384)}`)
+    header.push(`Rubric:\n${boundedUtf8(rubric, 24_576)}`)
+  } else {
+    header.push(`Fast rubric:\n${FAST_RUBRIC}`)
+  }
+  const prefix = header.join('\n\n')
+  const remaining = Math.max(1_024, maxContextBytes - Buffer.byteLength(prefix) - 96)
+  const diff = boundedUtf8(request.diff || '(no textual diff available)', remaining)
+  return boundedUtf8(`${prefix}\n\nBounded diff${request.diffTruncated ? ' (truncated; inspect files as needed)' : ''}:\n${diff}`, maxContextBytes)
 }
-
 /**
  * Start one fresh structured reviewer and dispose it after settlement.
  * @param ctx - runtime carrying skill, tool, and subagent services.
  * @param request - immutable review evidence and owner.
  * @param checks - deterministic check outcomes.
  * @param focus - merged caller and adapter focus.
+ * @param route - selected checks-only, fast, or deep reviewer route.
  * @param providerName - named one-shot subagent backend.
  * @param reviewerProvider - optional LLM provider override.
  * @param reviewerModel - optional LLM model override.
  * @param reviewerMaxTokens - positive output cap for each reviewer request.
+ * @param maxContextBytes - total UTF-8 input budget for one reviewer prompt.
  * @param signal - operation cancellation.
- * @returns normalized findings and effective reviewer route.
+ * @returns normalized findings and reviewer metadata.
  */
 export async function runReviewer(
   ctx: Context,
   request: EngineeringReviewRequest,
   checks: readonly EngineeringCheckResult[],
   focus: readonly string[],
+  route: EngineeringReviewRoute,
   providerName: string,
   reviewerProvider: string | undefined,
   reviewerModel: string | undefined,
   reviewerMaxTokens: number,
+  maxContextBytes: number,
   signal: AbortSignal,
 ): Promise<ReviewerOutcome> {
   const winningSkill = await ctx.skills.get('engineering-review', {
@@ -299,8 +327,8 @@ export async function runReviewer(
   // v8 ignore next -- the gate registers this skill at mount, so the bundled fallback never wins a mounted runtime.
   const skill = winningSkill?.content ?? skillBody(bundledSkillSource())
   const rubric = bundledRubricSource()
-  const prompt = reviewerPrompt(request, checks, focus, skill, rubric, projectInstructions)
-  const firstAttemptTools = request.depth === 'deep' || request.diffTruncated ? readOnlyTools : []
+  const prompt = reviewerPrompt(request, checks, focus, skill, rubric, projectInstructions, route, maxContextBytes)
+  const firstAttemptTools = route === 'deep' ? readOnlyTools : []
   let result = await startReviewer(ctx, providerName, request, signal, prompt, provider, model, reviewerMaxTokens, firstAttemptTools)
   // A reviewer that exhausts its output budget before emitting the structured
   // object (observed: narrative investigation prose on diff-less reviews) gets
@@ -356,9 +384,17 @@ async function startReviewer(
       ...provider === undefined ? {} : { provider },
       ...model === undefined ? {} : { model },
       maxTokens,
+      reasoningEffort: ReasoningEffortId('off'),
     },
     persona: 'You are an independent engineering reviewer. Do not edit files. Prefer precise evidence over speculative warnings.',
   })
+  const localAgent = run.localAgent
+  if (localAgent !== undefined) {
+    localAgent.ctx.on('agent/request', async (_payload, next) => {
+      const config = await next()
+      return { ...config, reasoningEffort: ReasoningEffortId('off') }
+    })
+  }
   try {
     return await run.result
   } finally {

@@ -2650,7 +2650,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentOptions',
-    declaration: 'export interface AgentOptions {\n    provider?: string;\n    model?: string;\n    maxTokens?: number;\n}',
+    declaration: 'export interface AgentOptions {\n    provider?: string;\n    model?: string;\n    maxTokens?: number;\n    reasoningEffort?: ReasoningEffortId;\n}',
   },
   {
     name: 'AgentPreset',
@@ -3082,11 +3082,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EngineeringReviewReport',
-    declaration: 'export interface EngineeringReviewReport {\n    readonly fingerprint: string;\n    readonly risk: EngineeringRisk;\n    readonly passed: boolean;\n    readonly checks: readonly EngineeringCheckResult[];\n    readonly findings: readonly EngineeringFinding[];\n    readonly reviewer: EngineeringReviewerResult;\n    readonly degradedReasons: readonly string[];\n}',
+    declaration: 'export interface EngineeringReviewReport {\n    readonly fingerprint: string;\n    readonly risk: EngineeringRisk;\n    readonly route: EngineeringReviewRoute;\n    readonly passed: boolean;\n    readonly checks: readonly EngineeringCheckResult[];\n    readonly findings: readonly EngineeringFinding[];\n    readonly reviewer: EngineeringReviewerResult;\n    readonly degradedReasons: readonly string[];\n}',
   },
   {
     name: 'EngineeringReviewRequest',
-    declaration: 'export interface EngineeringReviewRequest {\n    readonly agent: Agent;\n    readonly signal: AbortSignal;\n    readonly cwd: string;\n    readonly fingerprint: string;\n    readonly changedPaths: readonly string[];\n    readonly diff: string;\n    readonly diffTruncated: boolean;\n    readonly taskContext?: string;\n    readonly depth: EngineeringReviewDepth;\n    readonly focus?: readonly string[];\n    readonly unknownShellMutation?: boolean;\n    readText(relativePath: string): Promise<string | undefined>;\n    hasFile(relativePath: string): Promise<boolean>;\n}',
+    declaration: 'export interface EngineeringReviewRequest {\n    readonly agent: Agent;\n    readonly signal: AbortSignal;\n    readonly cwd: string;\n    readonly fingerprint: string;\n    readonly changedPaths: readonly string[];\n    readonly diff: string;\n    readonly diffTruncated: boolean;\n    readonly taskContext?: string;\n    readonly automatic?: boolean;\n    readonly depth: EngineeringReviewDepth;\n    readonly focus?: readonly string[];\n    readonly unknownShellMutation?: boolean;\n    readText(relativePath: string): Promise<string | undefined>;\n    hasFile(relativePath: string): Promise<boolean>;\n}',
+  },
+  {
+    name: 'EngineeringReviewRoute',
+    declaration: 'export type EngineeringReviewRoute = \'checks-only\' | \'fast\' | \'deep\';',
   },
   {
     name: 'EngineeringRisk',

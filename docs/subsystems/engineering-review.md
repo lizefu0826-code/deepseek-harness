@@ -12,7 +12,7 @@ Service Definition: [`@deepseek-ai/dsh-engineering-review`](../../packages/guard
 
 At the first pre-step of each turn, the service captures a Git object-identity baseline or starts a non-Git tool-observation window. At the stopping boundary it derives changed paths, a bounded diff, and a fingerprint. No change means no review. An already reviewed fingerprint reuses its result; a later mutation changes the fingerprint and re-enters the pipeline.
 
-The engine loads versioned project checks or discovers only existing standard scripts, merges adapter contributions, and runs applicable exact-argv checks under the mounted subprocess sandbox. Risk at or above the configured threshold starts a fresh structured reviewer. `deep` manual review always starts it; `fast` uses the threshold. Critical/high findings block only at high confidence. Required check failures also block, while warnings do not.
+The engine loads versioned project checks or discovers only existing standard scripts, merges adapter contributions, and runs applicable exact-argv checks under the mounted subprocess sandbox. The engine runs deterministic checks first and then selects `checks-only`, `fast`, or `deep`. Low risk stays checks-only; a complete single-line ordinary automatic edit also stays checks-only; medium risk uses a compact fast reviewer for substantive changes; high risk, unknown shell scope, or truncated evidence uses deep. A required check failure short-circuits reviewer dispatch and still blocks completion. `deep` manual review starts the reviewer after checks; warnings do not block.
 
 ```text
 pre-step baseline
@@ -31,8 +31,7 @@ Git inspection disables optional locks, external diff, and text conversion, and 
 
 Project checks are data-only exact argv. The runtime rejects direct command shells, package installation, automatic-fix flags, migrations, deployments, duplicate ids, and workspace-relative path escape. It never installs dependencies, creates build metadata, or asks an analyzer to rewrite code. Checks run inside existing sandbox authority and do not request broader approval automatically.
 
-The one-shot reviewer receives only a 16 KiB-bounded text projection of the latest direct user task, paths, bounded diff, check outcomes, project instructions, skill workflow, rubric, and focus. It receives neither parent-agent output nor plugin steering. Fast review gets no navigation tools when the diff is complete; deep review or a truncated diff may use available read-only file/image, LSP, and Git navigation tools. The structured schema requires one stable category from the shared engineering taxonomy. The parent runtime admits only high-confidence critical/high candidates with evidence on a changed line, generates finding ids, and maps every admitted finding to a blocker. Lower-confidence candidates are omitted instead of becoming warnings.
-
+The one-shot reviewer receives only a 16 KiB-bounded text projection of the latest direct user task, paths, bounded diff, check outcomes, project instructions, skill workflow, rubric, and focus. The prompt has a configurable total `maxReviewContextBytes` budget (128 KiB by default); fast review omits the full skill and rubric. It receives neither parent-agent output nor plugin steering. The prompt requires the final message to be exactly the structured JSON object with no prose, and file inspection is limited to verifying a specific candidate. Fast review gets no navigation tools when the diff is complete; deep review, a truncated diff, or an absent diff may use available read-only file/image, LSP, and Git navigation tools. The structured schema requires one stable category from the shared engineering taxonomy. The parent runtime admits only high-confidence critical/high candidates whose cited line falls inside the changed diff hunks (line-level admission; a truncated or absent diff falls back to file-level admission), generates finding ids, and maps every admitted finding to a blocker. Lower-confidence candidates are omitted instead of becoming warnings.
 ## Adapter contract
 
 `registerAdapter()` owns registration lifetime through Cordis effects. An adapter's asynchronous `contribute()` method may return risk signals, reviewer focus, and exact-argv checks. It cannot return a finding or blocker. `review()` caches the immutable fingerprint/depth/focus request per agent, sharing concurrent callers while keeping agents isolated.
@@ -75,5 +74,4 @@ registerAdapter(adapter: EngineeringReviewAdapter): () => void
 review(request: EngineeringReviewRequest): Promise<EngineeringReviewReport>
 ```
 
-Source: [`packages/guard/engineering-review/src/index.ts:224`](../../packages/guard/engineering-review/src/index.ts)
-<!-- END GENERATED cordis-surface -->
+Source: [`packages/guard/engineering-review/src/index.ts:275`](../../packages/guard/engineering-review/src/index.ts)<!-- END GENERATED cordis-surface -->
