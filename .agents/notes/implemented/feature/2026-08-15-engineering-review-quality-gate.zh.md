@@ -18,7 +18,7 @@ Status: implemented
 
 达到风险阈值时，启动一个全新的 one-shot 结构化 reviewer；默认继承父 agent 路由，只接收受限证据、项目指令、最终生效的 skill 与包内 rubric。请求最多包含最近一条直接用户任务中的 16 KiB 文本，使 reviewer 能按任务约定检查变更，同时不继承父 agent 输出、推理或插件 steering。diff 完整的 fast 审查没有导航工具；deep 审查或证据截断时，只允许使用已有的只读导航。类别必须来自稳定的工程分类；仅接纳高置信度、critical/high 且带变更行证据的 candidate，较低置信度 candidate 会被省略而不是保留为 warning。接纳的 blocker 最多按配置预算返回原 agent 修正；之后只请求一次最终未解决 blocker 报告，并允许再下一个停止边界结束。预算为零时提供只报告审查，不授权修复轮次。
 
-reviewer 输出默认限制为 8,192 token，并可通过 `reviewerMaxTokens` 显式覆盖。自动生命周期审查是常规门禁；`engineering_review` 工具只用于用户明确要求的额外或聚焦审查，避免 agent 重复发起同一次模型调用。
+reviewer 输出默认限制为 8,192 token，并可通过 `reviewerMaxTokens` 显式覆盖。自动生命周期审查是常规门禁；`engineering_review` 工具只用于用户明确要求的额外或聚焦审查，避免 agent 重复发起同一次模型调用。中风险自动调度由证据驱动：没有通用或适配器风险信号的普通代码改动只做 checks-only；匹配到风险信号时可以绕过微小改动抑制。每个隔离 reviewer 还有可配置的墙钟时限；超时会取消并释放子 agent，然后沿用现有的可见自审降级路径。`r`n`r`n整个 reviewer 所有的生命周期由 `prepareTimeoutMs`、`startTimeoutMs`、`executionTimeoutMs`、`disposeTimeoutMs`、有界迟到 handle watcher 和 `totalTimeoutMs` 限制。`DeadlineContext` 从单调时钟的总 deadline 派生每个阶段预算，因此准备、启动、执行或清理卡住都不能延长 parent agent 路径。启动超时后所有权转交 watcher；未确认的 provider 保持 `unknown`，迟到 handle 会尽力释放。审查结果与清理／资源状态分开报告，生命周期诊断按优先级记录并有数量和字节上限。
 
 每个 fingerprint 持久化一个精简的 `engineering-review/result` 事件。保留决策事实与降级原因，排除大段 diff、prompt、分析器流和重复缓存报告。
 

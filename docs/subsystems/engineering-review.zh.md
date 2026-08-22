@@ -12,7 +12,7 @@ Service Definition 为 [`@deepseek-ai/dsh-engineering-review`](../../packages/gu
 
 每轮首次 pre-step 时，服务会捕获 Git 对象标识基线，或启动一个非 Git 窗口，快照每个被触碰文件在首次变更前的内容。停止边界会生成变更路径、受限 diff（非 Git 轮次为基于内容快照生成的真实 unified diff）和 fingerprint。没有变化就不审查；已经审查的 fingerprint 会复用结果；后续修改会改变 fingerprint 并重新进入流水线。
 
-引擎会加载版本化项目检查，或者只发现已有的标准脚本，然后合并适配器贡献，并在已挂载的子进程沙箱中运行适用的精确 argv 检查。引擎先运行确定性检查，再选择 `checks-only`、`fast` 或 `deep`。低风险只做检查；达到阈值的中风险使用精简 fast reviewer；高风险、未知 shell 范围或证据截断进入 deep。必需检查失败会短路 reviewer 调度但仍阻止结束。手动 `deep` 在检查之后启动 reviewer；warning 不阻止结束。
+引擎会加载版本化项目检查，或者只发现已有的标准脚本，然后合并适配器贡献，并在已挂载的子进程沙箱中运行适用的精确 argv 检查。引擎先运行确定性检查，再选择 `checks-only`、`fast` 或 `deep`。低风险只做检查；没有通用或适配器风险证据的普通自动代码改动也只做检查；带有这类证据的中风险使用精简 fast reviewer；高风险、未知 shell 范围或证据截断进入 deep。必需检查失败会短路 reviewer 调度但仍阻止结束。手动 `deep` 在检查之后启动 reviewer；warning 不阻止结束。
 
 ```text
 pre-step baseline
@@ -23,7 +23,7 @@ pre-step baseline
   -> pass | steer correction | final blocker report
 ```
 
-reviewer 或可选分析器故障属于可见降级，而非静默成功。reviewer 在输出结构化结果前耗尽输出预算时，会用简洁作答指令、无工具、预算翻倍的子代理重试一次；只有再次失败才进入降级路径，主 agent 会针对该 fingerprint 收到一次聚焦自审请求。blocker 最多触发 `maxCorrectionPasses` 次修正请求。仍未解决时，下一个边界只触发一次“停止编辑并报告”的请求；再下一个边界正常结束。修正预算为零时是只报告模式，首个 blocker 会直接进入最终报告边界。
+reviewer 或可选分析器故障属于可见降级，而非静默成功。reviewer 在输出结构化结果前耗尽输出预算时，会用简洁作答指令、无工具、预算翻倍的子代理重试一次；只有再次失败才进入降级路径，主 agent 会针对该 fingerprint 收到一次聚焦自审请求。reviewer 子 agent 有可配置的准备、启动、执行、清理、watcher 和总 deadline。总 deadline 会限制每个阶段，因此任何 reviewer 操作都不能延长 parent agent 的关键路径。启动超时后所有权转交给有界 watcher；迟到 handle 会尽力回收，未确认的所有权保持 `unknown`。清理是尽力而为，失败会与审查结果分开记录。超时会显式降级并进入自审回退。blocker 最多触发 `maxCorrectionPasses` 次修正请求。仍未解决时，下一个边界只触发一次“停止编辑并报告”的请求；再下一个边界正常结束。修正预算为零时是只报告模式，首个 blocker 会直接进入最终报告边界。
 
 ## 证据与安全边界
 
@@ -41,7 +41,7 @@ one-shot reviewer 只接收最近一条直接用户任务中最多 16 KiB 的文
 
 ## 持久化投影
 
-每个 fingerprint 只记录一个 `engineering-review/result` 事件，其中包含精简决策证据：fingerprint、风险、通过状态、检查 id／status／required 三元组、finding 标识／类别／severity／confidence、文件与行坐标，以及可选降级原因。证据正文、diff、完整分析器输出、prompt 和重复的缓存报告都会被排除。该事件只进入日志，不进入普通模型历史。
+每个 fingerprint 只记录一个 `engineering-review/result` 事件，其中包含精简决策证据：fingerprint、风险、通过状态、检查 id／status／required 三元组、finding 标识／类别／severity／confidence、文件与行坐标，以及可选降级原因；还包含紧凑的生命周期 id、结果、资源状态、受限事件与 incident。证据正文、diff、完整分析器输出、prompt 和重复的缓存报告都会被排除。该事件只进入日志，不进入普通模型历史。
 
 包级 invariant 会拒绝 `passed` 与“必需检查失败／不可用”及 blocker finding 的反值关系不一致的结果。
 
@@ -75,5 +75,5 @@ registerAdapter(adapter: EngineeringReviewAdapter): () => void
 review(request: EngineeringReviewRequest): Promise<EngineeringReviewReport>
 ```
 
-Source: [`packages/guard/engineering-review/src/index.ts:278`](../../packages/guard/engineering-review/src/index.ts)
+Source: [`packages/guard/engineering-review/src/index.ts:362`](../../packages/guard/engineering-review/src/index.ts)
 <!-- END GENERATED cordis-surface -->

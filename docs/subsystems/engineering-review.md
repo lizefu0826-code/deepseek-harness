@@ -12,7 +12,7 @@ Service Definition: [`@deepseek-ai/dsh-engineering-review`](../../packages/guard
 
 At the first pre-step of each turn, the service captures a Git object-identity baseline or starts a non-Git window that snapshots each touched file's pre-mutation content. At the stopping boundary it derives changed paths, a bounded diff (for non-Git turns, a real unified diff built from the content snapshots), and a fingerprint. No change means no review. An already reviewed fingerprint reuses its result; a later mutation changes the fingerprint and re-enters the pipeline.
 
-The engine loads versioned project checks or discovers only existing standard scripts, merges adapter contributions, and runs applicable exact-argv checks under the mounted subprocess sandbox. The engine runs deterministic checks first and then selects `checks-only`, `fast`, or `deep`. Low risk stays checks-only; a complete single-line ordinary automatic edit also stays checks-only; medium risk uses a compact fast reviewer for substantive changes; high risk, unknown shell scope, or truncated evidence uses deep. A required check failure short-circuits reviewer dispatch and still blocks completion. `deep` manual review starts the reviewer after checks; warnings do not block.
+The engine loads versioned project checks or discovers only existing standard scripts, merges adapter contributions, and runs applicable exact-argv checks under the mounted subprocess sandbox. The engine runs deterministic checks first and then selects `checks-only`, `fast`, or `deep`. Low risk stays checks-only; ordinary automatic code edits without generic or adapter risk evidence also stay checks-only; medium risk with such evidence uses a compact fast reviewer; high risk, unknown shell scope, or truncated evidence uses deep. A required check failure short-circuits reviewer dispatch and still blocks completion. `deep` manual review starts the reviewer after checks; warnings do not block.
 
 ```text
 pre-step baseline
@@ -23,7 +23,7 @@ pre-step baseline
   -> pass | steer correction | final blocker report
 ```
 
-Reviewer and optional analyzer failure is a visible degradation, not silent success. A reviewer that exhausts its output budget before emitting structured findings is retried once with a concise-answer directive, no tools, and a doubled budget; only a second failure reaches the degradation path, where the main agent receives one focused self-review request for that fingerprint. A blocker receives at most `maxCorrectionPasses` correction requests. The next unresolved boundary receives one stop-editing final-report request; the following boundary closes normally. A zero correction budget is a report-only mode and sends the first blocker directly to that final-report boundary.
+Reviewer and optional analyzer failure is a visible degradation, not silent success. A reviewer that exhausts its output budget before emitting structured findings is retried once with a concise-answer directive, no tools, and a doubled budget; only a second failure reaches the degradation path, where the main agent receives one focused self-review request for that fingerprint. A reviewer child has configurable preparation, startup, execution, cleanup, watcher, and total deadlines. The total deadline bounds every phase, so no reviewer-owned operation extends the parent agent critical path. A startup timeout transfers ownership to a bounded watcher; a late handle is reclaimed when possible, while unconfirmed ownership remains `unknown`. Cleanup is best-effort and its failure is recorded separately from review outcome. Timeout is visible degradation and follows the self-review fallback. A blocker receives at most `maxCorrectionPasses` correction requests. The next unresolved boundary receives one stop-editing final-report request; the following boundary closes normally. A zero correction budget is a report-only mode and sends the first blocker directly to that final-report boundary.
 
 ## Evidence and safety boundaries
 
@@ -41,7 +41,7 @@ Hardware classification is deliberately only a selector. C/C++ paths contribute 
 
 ## Durable projection
 
-One `engineering-review/result` event per fingerprint retains compact decision evidence: fingerprint, risk, pass/fail, check id/status/required triples, finding identity/category/severity/confidence, file-and-line coordinates, and optional degradation reasons. It excludes evidence prose, the diff, full analyzer output, prompts, and repeated cached reports. The event is log-only and does not enter ordinary model history.
+One `engineering-review/result` event per fingerprint retains compact decision evidence: fingerprint, risk, pass/fail, check id/status/required triples, finding identity/category/severity/confidence, file-and-line coordinates, and optional degradation reasons. It also carries a compact lifecycle id, outcome, resource state, bounded events, and incidents. It excludes evidence prose, the diff, full analyzer output, prompts, and repeated cached reports. The event is log-only and does not enter ordinary model history.
 
 The package invariant rejects a result whose `passed` value is not exactly the inverse of its required failed/unavailable checks and blocker findings.
 
@@ -75,5 +75,5 @@ registerAdapter(adapter: EngineeringReviewAdapter): () => void
 review(request: EngineeringReviewRequest): Promise<EngineeringReviewReport>
 ```
 
-Source: [`packages/guard/engineering-review/src/index.ts:278`](../../packages/guard/engineering-review/src/index.ts)
+Source: [`packages/guard/engineering-review/src/index.ts:362`](../../packages/guard/engineering-review/src/index.ts)
 <!-- END GENERATED cordis-surface -->
