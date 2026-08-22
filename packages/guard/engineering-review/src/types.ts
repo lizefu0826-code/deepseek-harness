@@ -2,6 +2,7 @@
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { EngineeringFindingCategory } from './categories.ts'
+import type { LifecycleEvent, LifecycleIncident, ReviewerLifecycleSummary } from './lifecycle/types.ts'
 
 /** Ordered engineering risk used by adapters and review policy. */
 export type EngineeringRisk = 'low' | 'medium' | 'high'
@@ -41,6 +42,7 @@ export interface EngineeringReviewContribution {
   readonly checks?: readonly EngineeringCheckRecipe[]
   /** Non-blocking capability failures (e.g. explicit configuration pointing at a missing tool). */
   readonly degradedReasons?: readonly string[]
+  readonly lifecycle?: Pick<ReviewerLifecycleSummary, 'id' | 'outcome' | 'resource' | 'diagnostics'>
 }
 
 /** Inputs shared by automatic and manual review. */
@@ -128,6 +130,20 @@ export interface EngineeringReviewReport {
   readonly reviewer: EngineeringReviewerResult
   /** Non-blocking capability failures that require an explicit main-model self-review. */
   readonly degradedReasons: readonly string[]
+  /** Bounded lifecycle and resource diagnostics for an independent reviewer. */
+  readonly lifecycle?: ReviewerLifecycleSummary
+}
+
+/** Durable lifecycle record emitted independently of the business result snapshot. */
+export interface EngineeringReviewLifecycleLogData {
+  readonly fingerprint: string
+  readonly id: string
+  readonly kind: 'event' | 'incident' | 'finalized'
+  readonly event?: LifecycleEvent
+  readonly incident?: LifecycleIncident
+  readonly state?: ReviewerLifecycleSummary['state']
+  readonly outcome?: ReviewerLifecycleSummary['outcome']
+  readonly resource?: ReviewerLifecycleSummary['resource']
 }
 
 /** Compact durable projection of one completed review. */
@@ -153,5 +169,7 @@ declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Compact, log-only result for one reviewed change fingerprint. */
     'engineering-review/result': EngineeringReviewLogData
+    /** Lifecycle events remain durable after the business result is returned. */
+    'engineering-review/lifecycle': EngineeringReviewLifecycleLogData
   }
 }
