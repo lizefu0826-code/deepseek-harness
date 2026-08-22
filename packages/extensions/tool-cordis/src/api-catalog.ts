@@ -3070,8 +3070,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EngineeringReviewContribution',
-    declaration: 'export interface EngineeringReviewContribution {\n    readonly riskSignals?: readonly EngineeringRiskSignal[];\n    readonly focus?: readonly string[];\n    readonly checks?: readonly EngineeringCheckRecipe[];\n}',
-  },
+    declaration: 'export interface EngineeringReviewContribution {\n    readonly riskSignals?: readonly EngineeringRiskSignal[];\n    readonly focus?: readonly string[];\n    readonly checks?: readonly EngineeringCheckRecipe[];\n    readonly degradedReasons?: readonly string[];\n    readonly lifecycle?: Pick<ReviewerLifecycleSummary, \'id\' | \'outcome\' | \'resource\' | \'diagnostics\'>;\n}'  },
   {
     name: 'EngineeringReviewDepth',
     declaration: 'export type EngineeringReviewDepth = \'fast\' | \'deep\';',
@@ -3082,7 +3081,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'EngineeringReviewReport',
-    declaration: 'export interface EngineeringReviewReport {\n    readonly fingerprint: string;\n    readonly risk: EngineeringRisk;\n    readonly route: EngineeringReviewRoute;\n    readonly passed: boolean;\n    readonly checks: readonly EngineeringCheckResult[];\n    readonly findings: readonly EngineeringFinding[];\n    readonly reviewer: EngineeringReviewerResult;\n    readonly degradedReasons: readonly string[];\n}',
+    declaration: 'export interface EngineeringReviewReport {\n    readonly fingerprint: string;\n    readonly risk: EngineeringRisk;\n    readonly route: EngineeringReviewRoute;\n    readonly passed: boolean;\n    readonly checks: readonly EngineeringCheckResult[];\n    readonly findings: readonly EngineeringFinding[];\n    readonly reviewer: EngineeringReviewerResult;\n    readonly degradedReasons: readonly string[];\n    readonly lifecycle?: ReviewerLifecycleSummary;\n}',
   },
   {
     name: 'EngineeringReviewRequest',
@@ -3335,6 +3334,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KvUnitDescriptor',
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n}',
+  },
+  {
+    name: 'LifecycleEvent',
+    declaration: 'export interface LifecycleEvent {\n    readonly elapsedMs: number;\n    readonly phase: ReviewerLifecycleState;\n    readonly event: string;\n    readonly priority: LifecycleEventPriority;\n}',
+  },
+  {
+    name: 'LifecycleEventPriority',
+    declaration: 'export type LifecycleEventPriority = \'critical\' | \'warning\' | \'info\';',
+  },
+  {
+    name: 'LifecycleIncident',
+    declaration: 'export interface LifecycleIncident {\n    readonly phase: ReviewerLifecycleState;\n    readonly reason: LifecycleIncidentReason;\n    readonly recoverable: boolean;\n    readonly action: \'self-review\' | \'skip\' | \'report\';\n}',
+  },
+  {
+    name: 'LifecycleIncidentReason',
+    declaration: 'export type LifecycleIncidentReason = \'deadline-exceeded\' | \'provider-hang\' | \'io-hang\' | \'model-timeout\' | \'dispose-timeout\' | \'invalid-output\' | \'internal-error\';',
   },
   {
     name: 'LlmAdapter',
@@ -3699,6 +3714,30 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResumeAgentOptions',
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+  },
+  {
+    name: 'ReviewerLifecycleDiagnostics',
+    declaration: 'export interface ReviewerLifecycleDiagnostics {\n    readonly events: readonly LifecycleEvent[];\n    readonly incidents: readonly LifecycleIncident[];\n}',
+  },
+  {
+    name: 'ReviewerLifecycleState',
+    declaration: 'export type ReviewerLifecycleState = \'idle\' | \'preparing\' | \'spawning\' | \'executing\' | \'disposing\' | \'finished\';',
+  },
+  {
+    name: 'ReviewerLifecycleSummary',
+    declaration: 'export interface ReviewerLifecycleSummary {\n    readonly id: string;\n    readonly state: ReviewerLifecycleState;\n    readonly outcome: ReviewerOutcomeStatus;\n    readonly resource: ReviewerResourceResult;\n    readonly diagnostics: ReviewerLifecycleDiagnostics;\n}',
+  },
+  {
+    name: 'ReviewerOutcomeStatus',
+    declaration: 'export type ReviewerOutcomeStatus = \'success\' | \'failed\' | \'skipped\' | \'degraded\';',
+  },
+  {
+    name: 'ReviewerResourceResult',
+    declaration: 'export interface ReviewerResourceResult {\n    readonly state: ReviewerResourceState;\n    readonly reason?: string;\n}',
+  },
+  {
+    name: 'ReviewerResourceState',
+    declaration: 'export type ReviewerResourceState = \'clean\' | \'owned\' | \'cleanup-pending\' | \'orphaned\' | \'unknown\';',
   },
   {
     name: 'RpcError',

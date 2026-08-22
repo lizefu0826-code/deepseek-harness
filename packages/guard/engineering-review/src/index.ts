@@ -46,6 +46,8 @@ import {
 import { runArgv } from './process.ts'
 import { bundledSkillSource, runReviewer, skillBody } from './reviewer.ts'
 import { safeRelativeDirectory, validateCheckRecipe } from './recipe.ts'
+import type { ReviewerLifecycleSummary } from './lifecycle/types.ts'
+import { ReviewerLifecycleError } from './lifecycle/controller.ts'
 
 export type {
   EngineeringCheckRecipe,
@@ -63,6 +65,7 @@ export type {
   EngineeringRisk,
   EngineeringRiskSignal,
 } from './types.ts'
+export type { ReviewerLifecycleSummary } from './lifecycle/types.ts'
 export type { EngineeringFindingCategory } from './categories.ts'
 export { REVIEW_CATEGORIES } from './categories.ts'
 
@@ -71,6 +74,15 @@ const DEFAULT_MAX_FILES = 100
 const DEFAULT_CHECK_TIMEOUT_MS = 120_000
 const DEFAULT_REVIEWER_MAX_TOKENS = 8_192
 const DEFAULT_REVIEW_CONTEXT_BYTES = 128 * 1024
+const DEFAULT_REVIEWER_TIMEOUT_MS = 60_000
+const DEFAULT_PREPARE_TIMEOUT_MS = 5_000
+const DEFAULT_START_TIMEOUT_MS = 10_000
+const DEFAULT_SPAWN_WATCHER_TIMEOUT_MS = 30_000
+const DEFAULT_DISPOSE_TIMEOUT_MS = 5_000
+const DEFAULT_TOTAL_TIMEOUT_MS = 90_000
+const DEFAULT_MAX_DIAGNOSTIC_EVENTS = 32
+const DEFAULT_MAX_DIAGNOSTIC_INCIDENTS = 32
+const DEFAULT_MAX_DIAGNOSTIC_BYTES = 8 * 1024
 const MIN_AUTOMATIC_REVIEW_LINES = 2
 const RESULT_SUMMARY_BYTES = 2_048
 const TASK_CONTEXT_BYTES = 16 * 1024
@@ -104,6 +116,26 @@ export interface Config {
   readonly reviewerMaxTokens?: number
   /** Maximum UTF-8 bytes in one isolated reviewer prompt (default 128 KiB). */
   readonly maxReviewContextBytes?: number
+  /** Wall-clock deadline for one isolated reviewer attempt (default 60000). */
+  readonly reviewerTimeoutMs?: number
+  /** Deadline for reviewer preparation (default 5000). */
+  readonly prepareTimeoutMs?: number
+  /** Deadline for provider startup (default 10000). */
+  readonly startTimeoutMs?: number
+  /** Deadline for reclaiming a late provider handle (default 30000). */
+  readonly spawnWatcherTimeoutMs?: number
+  /** Deadline for model execution (default 60000). */
+  readonly executionTimeoutMs?: number
+  /** Deadline for reviewer cleanup (default 5000). */
+  readonly disposeTimeoutMs?: number
+  /** Total reviewer lifecycle deadline (default 90000). */
+  readonly totalTimeoutMs?: number
+  /** Maximum lifecycle events retained per reviewer (default 32). */
+  readonly maxDiagnosticEvents?: number
+  /** Maximum lifecycle incidents retained per reviewer (default 32). */
+  readonly maxDiagnosticIncidents?: number
+  /** Aggregate UTF-8 diagnostic budget per reviewer (default 8192). */
+  readonly maxDiagnosticBytes?: number
 }
 
 interface ResolvedConfig {
@@ -118,6 +150,16 @@ interface ResolvedConfig {
   readonly reviewerModel?: string
   readonly reviewerMaxTokens: number
   readonly maxReviewContextBytes: number
+  readonly reviewerTimeoutMs: number
+  readonly prepareTimeoutMs: number
+  readonly startTimeoutMs: number
+  readonly spawnWatcherTimeoutMs: number
+  readonly executionTimeoutMs: number
+  readonly disposeTimeoutMs: number
+  readonly totalTimeoutMs: number
+  readonly maxDiagnosticEvents: number
+  readonly maxDiagnosticIncidents: number
+  readonly maxDiagnosticBytes: number
 }
 
 interface GitTurnBaseline {
@@ -181,6 +223,16 @@ function resolveConfig(config: Config): ResolvedConfig {
     ...config.reviewerModel === undefined ? {} : { reviewerModel: config.reviewerModel },
     reviewerMaxTokens: config.reviewerMaxTokens ?? DEFAULT_REVIEWER_MAX_TOKENS,
     maxReviewContextBytes: config.maxReviewContextBytes ?? DEFAULT_REVIEW_CONTEXT_BYTES,
+    reviewerTimeoutMs: config.reviewerTimeoutMs ?? DEFAULT_REVIEWER_TIMEOUT_MS,
+    prepareTimeoutMs: config.prepareTimeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS,
+    startTimeoutMs: config.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS,
+    spawnWatcherTimeoutMs: config.spawnWatcherTimeoutMs ?? DEFAULT_SPAWN_WATCHER_TIMEOUT_MS,
+    executionTimeoutMs: config.executionTimeoutMs ?? config.reviewerTimeoutMs ?? DEFAULT_REVIEWER_TIMEOUT_MS,
+    disposeTimeoutMs: config.disposeTimeoutMs ?? DEFAULT_DISPOSE_TIMEOUT_MS,
+    totalTimeoutMs: config.totalTimeoutMs ?? DEFAULT_TOTAL_TIMEOUT_MS,
+    maxDiagnosticEvents: config.maxDiagnosticEvents ?? DEFAULT_MAX_DIAGNOSTIC_EVENTS,
+    maxDiagnosticIncidents: config.maxDiagnosticIncidents ?? DEFAULT_MAX_DIAGNOSTIC_INCIDENTS,
+    maxDiagnosticBytes: config.maxDiagnosticBytes ?? DEFAULT_MAX_DIAGNOSTIC_BYTES,
   }
   nonNegativeInteger(resolved.maxCorrectionPasses, 'maxCorrectionPasses')
   positiveInteger(resolved.maxDiffBytes, 'maxDiffBytes')
@@ -188,6 +240,16 @@ function resolveConfig(config: Config): ResolvedConfig {
   positiveInteger(resolved.checkTimeoutMs, 'checkTimeoutMs')
   positiveInteger(resolved.reviewerMaxTokens, 'reviewerMaxTokens')
   positiveInteger(resolved.maxReviewContextBytes, 'maxReviewContextBytes')
+  positiveInteger(resolved.reviewerTimeoutMs, 'reviewerTimeoutMs')
+  positiveInteger(resolved.prepareTimeoutMs, 'prepareTimeoutMs')
+  positiveInteger(resolved.startTimeoutMs, 'startTimeoutMs')
+  positiveInteger(resolved.spawnWatcherTimeoutMs, 'spawnWatcherTimeoutMs')
+  positiveInteger(resolved.executionTimeoutMs, 'executionTimeoutMs')
+  positiveInteger(resolved.disposeTimeoutMs, 'disposeTimeoutMs')
+  positiveInteger(resolved.totalTimeoutMs, 'totalTimeoutMs')
+  positiveInteger(resolved.maxDiagnosticEvents, 'maxDiagnosticEvents')
+  positiveInteger(resolved.maxDiagnosticIncidents, 'maxDiagnosticIncidents')
+  positiveInteger(resolved.maxDiagnosticBytes, 'maxDiagnosticBytes')
   if (resolved.subagentProvider.trim().length === 0) throw new TypeError('engineering-review: subagentProvider must not be empty')
   return resolved
 }
@@ -196,10 +258,30 @@ function maxRisk(risks: readonly EngineeringRisk[]): EngineeringRisk {
   return risks.reduce((highest, risk) => RISK_ORDER[risk] > RISK_ORDER[highest] ? risk : highest, 'low')
 }
 
+function isCodePath(path: string): boolean {
+  return /\.(?:[cm]?[ch]|cc|cpp|cxx|rs|go|py|java|kt|swift|ts|tsx|[cm]?js|jsx)$/iu.test(path)
+}
+
 function baseRisk(paths: readonly string[], unknownShellMutation: boolean): EngineeringRisk {
   if (unknownShellMutation) return 'high'
-  const code = /\.(?:[cm]?[ch]|cc|cpp|cxx|rs|go|py|java|kt|swift|ts|tsx|[cm]?js|jsx)$/iu
-  return paths.some(path => code.test(path)) ? 'medium' : 'low'
+  return paths.some(isCodePath) ? 'medium' : 'low'
+}
+
+function hasGenericRiskEvidence(paths: readonly string[], diff: string): boolean {
+  if (!paths.some(isCodePath)) return false
+  const changedLines = diff
+    .split(/\r?\n/u)
+    .filter(line => (line.startsWith('+') && !line.startsWith('+++')) || (line.startsWith('-') && !line.startsWith('---')))
+    .join('\\n')
+  const riskPattern = new RegExp(
+    '\\b(?:' + [
+      'atomic', 'blocking', 'cdc', 'close', 'dma', 'error', 'free', 'interrupt', 'isr', 'lock',
+      'malloc', 'mutex', 'poll', 'queue', 'reset', 'resource', 'retry', 'rollback', 'send',
+      'shared', 'sleep', 'timeout', 'transaction', 'unlock', 'wait',
+    ].join('|') + ')(?:[_a-z0-9]*)?\\b',
+    'iu',
+  )
+  return riskPattern.test(changedLines)
 }
 
 function changedLineCount(diff: string): number {
@@ -218,6 +300,7 @@ function selectRoute(
   risk: EngineeringRisk,
   checks: readonly EngineeringCheckResult[],
   threshold: EngineeringRisk,
+  genericRiskEvidence: boolean,
 ): EngineeringReviewRoute {
   const requiredFailure = checks.some(check => check.required && (check.status === 'failed' || check.status === 'unavailable'))
   if (requiredFailure) return 'checks-only'
@@ -226,10 +309,11 @@ function selectRoute(
   if (!explicitlyFocused && RISK_ORDER[risk] < RISK_ORDER[threshold]) return 'checks-only'
   const highRiskEvidence = risk === 'high' || request.diffTruncated || request.unknownShellMutation === true
   if (highRiskEvidence) return 'deep'
+  if (request.automatic === true && !explicitlyFocused && threshold === 'medium' && !genericRiskEvidence) return 'checks-only'
   // The automatic gate does not spend a model call on a tiny ordinary edit.
   // Adapters can still raise risk to high for a dangerous one-line change;
   // explicit focus/deep requests remain opt-in review paths.
-  if (request.automatic === true && !explicitlyFocused && request.diff.length > 0 && changedLineCount(request.diff) < MIN_AUTOMATIC_REVIEW_LINES) return 'checks-only'
+  if (request.automatic === true && !explicitlyFocused && !genericRiskEvidence && request.diff.length > 0 && changedLineCount(request.diff) < MIN_AUTOMATIC_REVIEW_LINES) return 'checks-only'
   return 'fast'
 }
 
@@ -289,6 +373,16 @@ export class EngineeringReviewRuntime extends Service {
     reviewerModel: z.string(),
     reviewerMaxTokens: z.number().default(DEFAULT_REVIEWER_MAX_TOKENS),
     maxReviewContextBytes: z.number().default(DEFAULT_REVIEW_CONTEXT_BYTES),
+    reviewerTimeoutMs: z.number().default(DEFAULT_REVIEWER_TIMEOUT_MS),
+    prepareTimeoutMs: z.number().default(DEFAULT_PREPARE_TIMEOUT_MS),
+    startTimeoutMs: z.number().default(DEFAULT_START_TIMEOUT_MS),
+    spawnWatcherTimeoutMs: z.number().default(DEFAULT_SPAWN_WATCHER_TIMEOUT_MS),
+    executionTimeoutMs: z.number(),
+    disposeTimeoutMs: z.number().default(DEFAULT_DISPOSE_TIMEOUT_MS),
+    totalTimeoutMs: z.number().default(DEFAULT_TOTAL_TIMEOUT_MS),
+    maxDiagnosticEvents: z.number().default(DEFAULT_MAX_DIAGNOSTIC_EVENTS),
+    maxDiagnosticIncidents: z.number().default(DEFAULT_MAX_DIAGNOSTIC_INCIDENTS),
+    maxDiagnosticBytes: z.number().default(DEFAULT_MAX_DIAGNOSTIC_BYTES),
   })
 
   private readonly config: ResolvedConfig
@@ -384,6 +478,7 @@ export class EngineeringReviewRuntime extends Service {
       throw new TypeError('engineering-review: adapter id must be non-empty and trimmed')
     }
     const id = adapter.id
+    // oxlint-disable-next-line typescript/no-misused-promises -- synchronous cleanup; direct return preserves disposer identity
     return this.ctx.effect(function* (this: EngineeringReviewRuntime) {
       if (this.adapters.has(id)) throw new Error(`engineering-review: duplicate adapter ${JSON.stringify(id)}`)
       this.adapters.set(id, adapter)
@@ -448,7 +543,8 @@ export class EngineeringReviewRuntime extends Service {
     for (const check of checks) checkResults.push(await this.runCheck(check, request))
     let findings: EngineeringReviewReport['findings'] = []
     let reviewer: EngineeringReviewReport['reviewer'] = { used: false }
-    const route = selectRoute(request, risk, checkResults, this.config.riskThreshold)
+    let lifecycle: ReviewerLifecycleSummary | undefined
+    const route = selectRoute(request, risk, checkResults, this.config.riskThreshold, hasGenericRiskEvidence(request.changedPaths, request.diff) || contributions.some(value => value.riskSignals?.some(signal => signal.risk !== 'low') === true))
     degradedReasons.push(...checkResults
       .filter(check => !check.required && (check.status === 'failed' || check.status === 'unavailable'))
       .map(check => `optional check ${check.id} ${check.status}: ${check.summary}`.slice(0, 1_024)))
@@ -465,9 +561,23 @@ export class EngineeringReviewRuntime extends Service {
           this.config.reviewerModel,
           this.config.reviewerMaxTokens,
           this.config.maxReviewContextBytes,
+          {
+            prepareTimeoutMs: this.config.prepareTimeoutMs,
+            startTimeoutMs: this.config.startTimeoutMs,
+            spawnWatcherTimeoutMs: this.config.spawnWatcherTimeoutMs,
+            executionTimeoutMs: this.config.executionTimeoutMs,
+            disposeTimeoutMs: this.config.disposeTimeoutMs,
+            totalTimeoutMs: this.config.totalTimeoutMs,
+            diagnosticBudget: {
+              maxEvents: this.config.maxDiagnosticEvents,
+              maxIncidents: this.config.maxDiagnosticIncidents,
+              maxBytes: this.config.maxDiagnosticBytes,
+            },
+          },
           request.signal,
         )
         findings = outcome.findings
+        lifecycle = outcome.lifecycle
         reviewer = {
           used: true,
           ...outcome.provider === undefined ? {} : { provider: outcome.provider },
@@ -476,6 +586,7 @@ export class EngineeringReviewRuntime extends Service {
       } catch (error) {
         if (request.signal.aborted) throw error
         const degradedReason = errorMessage(error).slice(0, 1_024)
+        lifecycle = error instanceof ReviewerLifecycleError ? error.summary : undefined
         reviewer = { used: false, degradedReason }
         degradedReasons.push(`independent reviewer unavailable: ${degradedReason}`)
       }
@@ -491,6 +602,7 @@ export class EngineeringReviewRuntime extends Service {
       findings,
       reviewer,
       degradedReasons,
+      ...lifecycle === undefined ? {} : { lifecycle },
     }
   }
 
@@ -745,6 +857,7 @@ export class EngineeringReviewRuntime extends Service {
         })),
       })),
       ...report.degradedReasons.length === 0 ? {} : { degradedReasons: report.degradedReasons },
+      ...report.lifecycle === undefined ? {} : { lifecycle: report.lifecycle },
     }
     agent.session.append('engineering-review/result', data)
   }

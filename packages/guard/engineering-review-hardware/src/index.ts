@@ -118,7 +118,7 @@ class HardwareReviewAdapter implements EngineeringReviewAdapter {
       riskSignals: [
         ...cPaths.length === 0 ? [] : [hasPotentiallyUnboundedHardwarePoll(request.diff)
           ? { risk: 'high' as const, reason: 'Changed C/C++ control flow may poll hardware state without an observable bound.' }
-          : { risk: 'medium' as const, reason: 'C/C++ changes can couple blocking, memory, interrupt, and hardware-resource behavior.' }],
+          : { risk: 'low' as const, reason: 'C/C++ focus is available; no specific blocking, memory, interrupt, or hardware-resource signal was found.' }],
         ...hdlPaths.length === 0 ? [] : [hasHighRiskHdl(hdlPaths, request.diff)
           ? { risk: 'high' as const, reason: 'HDL changes can alter clock, reset, handshake, width, synthesis, and timing behavior.' }
           : { risk: 'low' as const, reason: 'HDL change has no clock/reset/CDC or interface-risk signal; deterministic checks still apply.' }],

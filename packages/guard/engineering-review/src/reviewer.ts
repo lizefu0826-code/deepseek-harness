@@ -6,6 +6,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
+import { ReviewerLifecycleController, ReviewerLifecycleError } from './lifecycle/controller.ts'
+import type { ReviewerLifecycleBudgets } from './lifecycle/controller.ts'
+import type { DiagnosticSink, ReviewerLifecycleSummary } from './lifecycle/types.ts'
 import type {
   EngineeringCheckResult,
   EngineeringFinding,
@@ -71,6 +74,7 @@ export interface ReviewerOutcome {
   readonly findings: readonly EngineeringFinding[]
   readonly provider?: string
   readonly model?: string
+  readonly lifecycle: ReviewerLifecycleSummary
 }
 
 /**
@@ -278,8 +282,22 @@ function reviewerPrompt(
   const diff = boundedUtf8(request.diff || '(no textual diff available)', remaining)
   return boundedUtf8(`${prefix}\n\nBounded diff${request.diffTruncated ? ' (truncated; inspect files as needed)' : ''}:\n${diff}`, maxContextBytes)
 }
+async function awaitWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason ?? new Error('reviewer operation aborted')
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<T>((_resolve, reject) => {
+    onAbort = () => { reject(signal.reason instanceof Error ? signal.reason : new Error('reviewer operation aborted')) }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([promise, aborted])
+  } finally {
+    if (onAbort !== undefined) signal.removeEventListener('abort', onAbort)
+  }
+}
+
 /**
- * Start one fresh structured reviewer and dispose it after settlement.
+ * Run one fresh structured reviewer under bounded lifecycle ownership.
  * @param ctx - runtime carrying skill, tool, and subagent services.
  * @param request - immutable review evidence and owner.
  * @param checks - deterministic check outcomes.
@@ -290,8 +308,9 @@ function reviewerPrompt(
  * @param reviewerModel - optional LLM model override.
  * @param reviewerMaxTokens - positive output cap for each reviewer request.
  * @param maxContextBytes - total UTF-8 input budget for one reviewer prompt.
+ * @param budgets - bounded prepare, spawn, execute, cleanup, and total deadlines.
  * @param signal - operation cancellation.
- * @returns normalized findings and reviewer metadata.
+ * @returns normalized findings, reviewer metadata, and lifecycle diagnostics.
  */
 export async function runReviewer(
   ctx: Context,
@@ -304,76 +323,103 @@ export async function runReviewer(
   reviewerModel: string | undefined,
   reviewerMaxTokens: number,
   maxContextBytes: number,
+  budgets: ReviewerLifecycleBudgets,
   signal: AbortSignal,
 ): Promise<ReviewerOutcome> {
-  const winningSkill = await ctx.skills.get('engineering-review', {
-    cwd: request.cwd,
-    scope: request.agent,
-    signal,
-  })
-  const projectInstructions = await request.readText('AGENTS.md')
-  const readOnlyTools = [
-    'read',
-    'read_image',
-    'lsp',
-    'git_status',
-    'git_diff',
-    'git_log',
-    'git_show',
-    'git_grep',
-  ].filter(name => ctx.tools.get(name, request.agent) !== undefined)
-  const provider = reviewerProvider ?? request.agent.options.provider
-  const model = reviewerModel ?? request.agent.options.model
-  // v8 ignore next -- the gate registers this skill at mount, so the bundled fallback never wins a mounted runtime.
-  const skill = winningSkill?.content ?? skillBody(bundledSkillSource())
-  const rubric = bundledRubricSource()
-  const prompt = reviewerPrompt(request, checks, focus, skill, rubric, projectInstructions, route, maxContextBytes)
-  const firstAttemptTools = route === 'deep' ? readOnlyTools : []
-  let result = await startReviewer(ctx, providerName, request, signal, prompt, provider, model, reviewerMaxTokens, firstAttemptTools)
-  // A reviewer that exhausts its output budget before emitting the structured
-  // object (observed: narrative investigation prose on diff-less reviews) gets
-  // one retry: a fresh child with a concise-answer directive, no tools, and a
-  // doubled budget. Any other failure mode still degrades immediately.
-  if (result.stopReason === 'max-tokens' && result.structured === undefined) {
-    result = await startReviewer(
-      ctx, providerName, request, signal,
-      `${prompt}\n\n${MAX_TOKENS_RETRY_DIRECTIVE}`,
-      provider, model, reviewerMaxTokens * 2, [],
+  let lifecycleId = ''
+  const diagnosticSink: DiagnosticSink = {
+    append: (event) => {
+      try { request.agent.session.append('engineering-review/lifecycle', { fingerprint: request.fingerprint, id: lifecycleId, kind: 'event', event }) } catch {
+        // A closed session must not affect the reviewer result.
+      }
+    },
+    appendIncident: (incident) => {
+      try { request.agent.session.append('engineering-review/lifecycle', { fingerprint: request.fingerprint, id: lifecycleId, kind: 'incident', incident }) } catch {
+        // A closed session must not affect the reviewer result.
+      }
+    },
+    finalize: (summary) => {
+      try { request.agent.session.append('engineering-review/lifecycle', { fingerprint: request.fingerprint, id: summary.id, kind: 'finalized', state: summary.state, outcome: summary.outcome, resource: summary.resource }) } catch {
+        // A closed session must not affect the reviewer result.
+      }
+    },
+  }
+  const lifecycle = new ReviewerLifecycleController(signal, budgets, undefined, diagnosticSink)
+  lifecycleId = lifecycle.id
+  try {
+    let winningSkill: { content?: string } | undefined
+    let projectInstructions: string | undefined
+    await lifecycle.runPhase('preparing', budgets.prepareTimeoutMs, async (phaseSignal) => {
+      winningSkill = await ctx.skills.get('engineering-review', {
+        cwd: request.cwd,
+        scope: request.agent,
+        signal: phaseSignal,
+      })
+      projectInstructions = await awaitWithSignal(request.readText('AGENTS.md'), phaseSignal)
+    })
+    const readOnlyTools = [
+      'read',
+      'read_image',
+      'lsp',
+      'git_status',
+      'git_diff',
+      'git_log',
+      'git_show',
+      'git_grep',
+    ].filter(name => ctx.tools.get(name, request.agent) !== undefined)
+    const provider = reviewerProvider ?? request.agent.options.provider
+    const model = reviewerModel ?? request.agent.options.model
+    // v8 ignore next -- the gate registers this skill at mount, so the bundled fallback never wins a mounted runtime.
+    const skill = winningSkill?.content ?? skillBody(bundledSkillSource())
+    const rubric = bundledRubricSource()
+    const prompt = reviewerPrompt(request, checks, focus, skill, rubric, projectInstructions, route, maxContextBytes)
+    const firstAttemptTools = route === 'deep' ? readOnlyTools : []
+    let result = await startReviewer(
+      ctx, providerName, request, lifecycle, prompt, provider, model, reviewerMaxTokens, firstAttemptTools,
     )
-  }
-  if (result.stopReason !== 'completed' || result.structured === undefined) {
-    throw new Error(`reviewer stopped with ${JSON.stringify(result.stopReason)} without structured findings`)
-  }
-  const raw = result.structured as RawReview
-  // A truncated or absent diff cannot prove a citation lies inside the
-  // change, so line-level admission applies only to a complete diff.
-  const changedRanges = request.diffTruncated || request.diff.length === 0
-    ? undefined
-    : changedLineRanges(request.diff)
-  return {
-    findings: raw.findings
-      .filter(finding => admitReviewerFinding(finding, request.changedPaths, changedRanges))
-      .map(normalizeReviewerFinding),
-    ...provider === undefined ? {} : { provider },
-    ...model === undefined ? {} : { model },
+    if (result.stopReason === 'max-tokens' && result.structured === undefined) {
+      result = await startReviewer(
+        ctx, providerName, request, lifecycle,
+        `${prompt}\n\n${MAX_TOKENS_RETRY_DIRECTIVE}`,
+        provider, model, reviewerMaxTokens * 2, [],
+      )
+    }
+    if (result.stopReason !== 'completed' || result.structured === undefined) {
+      throw new ReviewerLifecycleError(`reviewer stopped with ${JSON.stringify(result.stopReason)} without structured findings`, 'executing', 'invalid-output', lifecycle.summary())
+    }
+    const raw = result.structured as RawReview
+    const changedRanges = request.diffTruncated || request.diff.length === 0
+      ? undefined
+      : changedLineRanges(request.diff)
+    return {
+      findings: raw.findings
+        .filter(finding => admitReviewerFinding(finding, request.changedPaths, changedRanges))
+        .map(normalizeReviewerFinding),
+      ...provider === undefined ? {} : { provider },
+      ...model === undefined ? {} : { model },
+      lifecycle: lifecycle.finish('success'),
+    }
+  } catch (error) {
+    const summary = lifecycle.finish('degraded')
+    if (error instanceof ReviewerLifecycleError) {
+      throw new ReviewerLifecycleError(error.message, error.phase, error.reason, summary)
+    }
+    throw new ReviewerLifecycleError(error instanceof Error ? error.message : String(error), 'preparing', 'internal-error', summary)
   }
 }
-
-/** Directive appended to the retry attempt after an output-budget truncation. */
-const MAX_TOKENS_RETRY_DIRECTIVE = 'Your previous attempt was cut off by the output limit before returning the structured findings. Respond now with ONLY the requested JSON object: concise findings, no narrative and no investigation summary.'
 
 async function startReviewer(
   ctx: Context,
   providerName: string,
   request: EngineeringReviewRequest,
-  signal: AbortSignal,
+  lifecycle: ReviewerLifecycleController,
   prompt: string,
   provider: string | undefined,
   model: string | undefined,
   maxTokens: number,
   allowTools: readonly string[],
 ): Promise<SubagentResult> {
-  const run = await ctx.subagents.start(providerName, {
+  const run = await lifecycle.spawn(signal => ctx.subagents.start(providerName, {
     label: 'engineering review',
     parent: request.agent,
     signal,
@@ -387,17 +433,32 @@ async function startReviewer(
       reasoningEffort: ReasoningEffortId('off'),
     },
     persona: 'You are an independent engineering reviewer. Do not edit files. Prefer precise evidence over speculative warnings.',
-  })
+  }))
   const localAgent = run.localAgent
+  let disposeRequestListener: (() => void) | undefined
   if (localAgent !== undefined) {
-    localAgent.ctx.on('agent/request', async (_payload, next) => {
+    disposeRequestListener = localAgent.ctx.on('agent/request', async (_payload, next) => {
       const config = await next()
       return { ...config, reasoningEffort: ReasoningEffortId('off') }
     })
   }
   try {
-    return await run.result
+    return await lifecycle.runPhase('executing', lifecycle.executionTimeoutMs, () => run.result)
+  } catch (error) {
+    if (error instanceof ReviewerLifecycleError) throw error
+    throw new ReviewerLifecycleError(error instanceof Error ? error.message : String(error), 'executing', 'internal-error', lifecycle.summary())
   } finally {
-    await run.dispose()
+    try {
+      disposeRequestListener?.()
+    } catch {
+      // Listener disposal is best effort and cannot replace the review result.
+    }
+    try {
+      await lifecycle.dispose(run)
+    } catch {
+      // The lifecycle summary records cleanup degradation without replacing a valid review result.
+    }
   }
 }
+/** Directive appended to the retry attempt after an output-budget truncation. */
+const MAX_TOKENS_RETRY_DIRECTIVE = 'Your previous attempt was cut off by the output limit before returning the structured findings. Respond now with ONLY the requested JSON object: concise findings, no narrative and no investigation summary.'
