@@ -1,6 +1,6 @@
 # Agent Note: 工程审查召回——reviewer 未应用任务声明的契约
 
-Status: proposed
+Status: implemented
 
 [English](2026-08-15-engineering-review-recall-diagnosis.md) | 中文
 

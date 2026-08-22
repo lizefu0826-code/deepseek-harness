@@ -1,6 +1,6 @@
 # Agent Note: Engineering-review recall — reviewer did not apply a task-declared contract
 
-Status: proposed
+Status: implemented
 
 English | [中文](2026-08-15-engineering-review-recall-diagnosis.zh.md)
 
