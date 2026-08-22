@@ -57,7 +57,7 @@ describe('hardware engineering review adapter', () => {
       '+ while ((uart->status & UART_READY) == 0u) {\n+   if (elapsed > timeout) return -1;\n+ }',
     ), new AbortController().signal)
     expect(unbounded?.riskSignals?.[0]?.risk).toBe('high')
-    expect(bounded?.riskSignals?.[0]?.risk).toBe('medium')
+    expect(bounded?.riskSignals?.[0]?.risk).toBe('low')
   })
 
   it('does not contribute to unrelated languages', async () => {
@@ -119,7 +119,7 @@ describe('hardware engineering review adapter', () => {
       [],
       '+ for (;;) {\n+   if (deadline_elapsed) break;\n+ }',
     ), new AbortController().signal)
-    expect(bounded?.riskSignals?.[0]?.risk).toBe('medium')
+    expect(bounded?.riskSignals?.[0]?.risk).toBe('low')
   })
 
   it('uses an existing explicitly configured Verilator argument file', async () => {
