@@ -64,6 +64,7 @@ describe('engineering review configuration validation', () => {
 
   it('rejects invalid runtime configuration at mount time', () => {
     expect(() => new EngineeringReviewRuntime(new Context(), { maxDiffBytes: 0 })).toThrow(/positive safe integer/u)
+    expect(() => new EngineeringReviewRuntime(new Context(), { reviewerTimeoutMs: 0 })).toThrow(/positive safe integer/u)
     expect(() => new EngineeringReviewRuntime(new Context(), { maxCorrectionPasses: -1 })).toThrow(/non-negative safe integer/u)
     expect(() => new EngineeringReviewRuntime(new Context(), { subagentProvider: ' ' })).toThrow(/must not be empty/u)
   })

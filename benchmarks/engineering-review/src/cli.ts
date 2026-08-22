@@ -7,6 +7,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { load } from 'js-yaml'
+import { generateReport } from './report.js'
 
 const REVIEW_CATEGORIES = [
   'blocking-and-concurrency',
@@ -1126,10 +1127,29 @@ async function calibrate(args: readonly string[]): Promise<void> {
   process.stdout.write(`${JSON.stringify(summary)}\n${runArtifacts}\n`)
 }
 
+async function report(argv: string[]) {
+  let artifactsRoot = join(process.cwd(), '.artifacts', 'engineering-review-bench')
+  let outputDir = join(process.cwd(), 'benchmarks', 'engineering-review', 'report')
+  for (let index = 0; index < argv.length; index += 1) {
+    const flag = argv[index]
+    const value = argv[index + 1]
+    if ((flag === '--artifacts' || flag === '--out') && value !== undefined) {
+      if (flag === '--artifacts') artifactsRoot = value
+      else outputDir = value
+      index += 1
+    }
+  }
+  const { records, headline } = await generateReport(artifactsRoot, outputDir)
+  process.stdout.write(
+    `report: ${records.length} cells (${headline.length} in headline batch) → ${outputDir}\n`,
+  )
+}
+
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (isMain) {
   const command = process.argv[2]
   if (command === 'validate') await validate()
   else if (command === 'calibrate') await calibrate(process.argv.slice(3))
-  else throw new Error('usage: cli.ts <validate|calibrate [--runs N] [--variant buggy|fixed|all] [--condition control|treatment|all] [--task-mode fix|review] [--case ID]>')
+  else if (command === 'report') await report(process.argv.slice(3))
+  else throw new Error('usage: cli.ts <validate|calibrate|report [--artifacts DIR] [--out DIR]>')
 }

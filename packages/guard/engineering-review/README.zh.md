@@ -8,7 +8,7 @@
 
 ## 组合方式
 
-请在 agent、文件系统、子进程、skill、tool 和 subagent 服务之后挂载本服务。默认 reviewer 使用全新的 one-shot `spawn` 后端；如果没有配置 `reviewerProvider` 或 `reviewerModel`，则继承父 agent 的 LLM provider 和 model。每次 reviewer 请求都受独立的 `reviewerMaxTokens` 输出上限约束，默认值为 8192。
+请在 agent、文件系统、子进程、skill、tool 和 subagent 服务之后挂载本服务。默认 reviewer 使用全新的 one-shot `spawn` 后端；如果没有配置 `reviewerProvider` 或 `reviewerModel`，则继承父 agent 的 LLM provider 和 model。每次 reviewer 请求都受独立的 `reviewerMaxTokens` 输出上限约束（默认 8192）、`maxReviewContextBytes` 输入预算（默认 128 KiB）和 `reviewerTimeoutMs` 墙钟时限（默认 60000 ms）约束。生命周期还分别限制准备阶段（`prepareTimeoutMs`，5000 毫秒）、provider 启动（`startTimeoutMs`，10000 毫秒）、迟到 handle 回收（`spawnWatcherTimeoutMs`，30000 毫秒）、清理（`disposeTimeoutMs`，5000 毫秒）和 reviewer 总路径（`totalTimeoutMs`，90000 毫秒）；总 deadline 始终优先。
 
 ```yaml
 - id: engineering-review
@@ -22,6 +22,14 @@
     checkTimeoutMs: 120000
     subagentProvider: spawn
     reviewerMaxTokens: 8192
+    maxReviewContextBytes: 131072
+    reviewerTimeoutMs: 60000
+    prepareTimeoutMs: 5000
+    startTimeoutMs: 10000
+    spawnWatcherTimeoutMs: 30000
+    executionTimeoutMs: 60000
+    disposeTimeoutMs: 5000
+    totalTimeoutMs: 90000
 ```
 
 本包会注册 `ctx.engineeringReview`、`engineering_review` 工具和 `engineering-review` skill。项目级 `.dsh/skills/engineering-review` 会按正常的 skill 优先级覆盖内置 skill。详细 rubric 保留在包内的 skill reference 中，并直接提供给隔离 reviewer。
@@ -30,17 +38,17 @@
 
 首次 `agent/pre-step` 时，Git 工作区会捕获只读基线。Git 调用使用固定参数数组、`--no-optional-locks`、`--no-ext-diff` 和 `--no-textconv`；worktree 与 index 的对象标识可覆盖 staged、unstaged、untracked、rename 和 delete，而不会调用仓库控制的 filter。自动审查会在停止边界与该基线比较，因此预先存在的脏改动不会被算成本轮变化，除非本轮再次修改了它。文件数或 diff 超限会成为明确的高风险证据，不会静默隐藏。
 
-非 Git 工作区通过成功的 `write`、`edit` 和 `str_replace_editor` 结果取得变更路径。成功的 shell 或 terminal 调用可能产生任意副作用，因此运行时会记录“变更范围未知”并提高风险，而不是声称追踪完整。每个 agent 的状态互相隔离；相同的 fingerprint／depth／focus 组合会共享正在进行或已经完成的审查。后续代码修改会产生新 fingerprint，并再次审查。
+非 Git 工作区通过成功的 `write`、`edit` 和 `str_replace_editor` 结果取得变更路径，并在首次变更时快照文件内容；审查时把该基线 diff 到当前文本，因此 reviewer 拿到的是覆盖新建、修改、删除与截断文件的真实 unified diff，而不是空的变更清单。同一轮内创建再删除的文件会产生空 diff 且不授予 reviewer 任何工具，reviewer 直接根据 prompt 作答而不是搜寻文件。成功的 shell 或 terminal 调用可能产生任意副作用，因此运行时会记录“变更范围未知”并提高风险，而不是声称追踪完整。每个 agent 的状态互相隔离；相同的 fingerprint／depth／focus 组合会共享正在进行或已经完成的审查。后续代码修改会产生新 fingerprint，并再次审查。
 
 ## 检查、复核与停止行为
 
 显式 `.dsh/engineering-review.yml` 优先于保守的自动发现。缺少该文件时，JavaScript 工作区可运行已有的 `typecheck` 和 `lint` 脚本（手动 deep 审查还会加入 `test`）；Cargo 工作区可运行 `cargo check`（deep 时加入 `cargo test`）。运行时不会生成构建元数据或安装工具。每个检查都以精确 argv 在现有子进程沙箱策略下执行；命令 shell、依赖安装、自动修复、迁移、部署、路径逃逸和重复 id 会在校验时失败。
 
-warning 不会阻止结束。必需检查失败或不可用，或者 reviewer 给出 critical/high 且高置信度的发现，才形成 blocker。可选分析器或 reviewer 故障属于非阻塞降级：运行时会明确要求主 agent 完成一次基于 rubric 的自审。blocker 会被送回同一个 agent 修正。达到 `maxCorrectionPasses` 后，运行时只再要求一次最终证据报告，并允许下一个停止边界正常结束，从而避免无限循环。把修正预算设为零会启用只报告行为：首个 blocker 会直接请求最终报告，不会授权修复轮次。
+warning 不会阻止结束。必需检查失败或不可用，或者 reviewer 给出 critical/high 且高置信度的发现，才形成 blocker。可选分析器故障属于非阻塞降级：运行时会明确要求主 agent 完成一次基于 rubric 的自审。reviewer 在输出结构化结果前耗尽输出预算时，会用简洁作答指令、无工具、预算翻倍的子代理重试一次；只有再次失败才降级为自审 steering。blocker 会被送回同一个 agent 修正。达到 `maxCorrectionPasses` 后，运行时只再要求一次最终证据报告，并允许下一个停止边界正常结束，从而避免无限循环。把修正预算设为零会启用只报告行为：首个 blocker 会直接请求最终报告，不会授权修复轮次。
 
-独立 reviewer 是一个全新的 one-shot 子 agent，不继承父会话的推理历史。它接收最近一条直接用户任务中最多 16 KiB 的文本，以及受限的变更证据、检查结果、项目指令、最终生效的 skill 和 rubric；agent 输出和插件 steering 不会进入任务投影。diff 完整的 fast 审查没有导航工具；deep 审查或 diff 截断时，才允许使用部署中已有的只读文件、图片、LSP 与 Git 导航工具。reviewer 不能调用写入、编辑、shell、terminal、部署或自动修复工具。即使父级路由的 provider 默认值更大，`reviewerMaxTokens` 也会约束每次子请求。
+独立 reviewer 是一个全新的 one-shot 子 agent，不继承父会话的推理历史。它接收最近一条直接用户任务中最多 16 KiB 的文本，以及受限的变更证据、检查结果、项目指令、最终生效的 skill 和 rubric；agent 输出和插件 steering 不会进入任务投影。prompt 要求最终消息必须是纯结构化 JSON 对象、不得有散文，文件检查仅限于验证具体候选。diff 完整的 fast 审查没有导航工具；自动门禁对完整 diff 中的普通单行变更保持 checks-only，只有有实质变更的中风险才使用 fast；deep 审查、diff 截断或 diff 缺失时才允许使用部署中已有的只读文件、图片、LSP 与 Git 导航工具。reviewer 不能调用写入、编辑、shell、terminal、部署或自动修复工具。即使父级路由的 provider 默认值更大，`reviewerMaxTokens` 也会约束每次子请求；超过 `reviewerTimeoutMs` 的子 reviewer 会被取消并降级为自审 steering。准备、启动、执行和清理分别受生命周期预算限制；清理是尽力而为，不会替换有效的审查结果。启动超时后所有权转交给有界 watcher：迟到的 handle 会被清理，未确认的 provider 保持 `unknown`，不会被误报为已确认泄漏。生命周期诊断包含 correlation id、受限事件、incident、结果和资源状态。
 
-运行时只接纳高置信度、critical/high 且至少引用一个变更文件行的 candidate。较低置信度 candidate、low/medium 建议、诊断偏好、API 风格建议、可选加固以及只有变更范围外证据的 candidate 都不会进入报告。结构化 schema 把类别限制在稳定的工程分类中，覆盖并发、生命周期、恢复、数据完整性、实时行为、状态与兼容性、安全、验证，以及 HDL 专用的时钟／复位／CDC 和位宽／时序语义。接纳的 finding 还包含置信度、文件和行证据、影响、修复建议与验证方法；运行时生成稳定 id，并把每个接纳的 candidate 映射为 blocker。
+运行时只接纳高置信度、critical/high 且至少引用一个落在变更 diff hunk 内的变更文件行的 candidate（行级接纳；diff 截断或缺失时回退到文件级接纳）。较低置信度 candidate、low/medium 建议、诊断偏好、API 风格建议、可选加固以及只有变更范围外证据的 candidate 都不会进入报告。结构化 schema 把类别限制在稳定的工程分类中，覆盖并发、生命周期、恢复、数据完整性、实时行为、状态与兼容性、安全、验证，以及 HDL 专用的时钟／复位／CDC 和位宽／时序语义。接纳的 finding 还包含置信度、文件和行证据、影响、修复建议与验证方法；运行时生成稳定 id，并把每个接纳的 candidate 映射为 blocker。
 
 ## 项目检查
 
@@ -65,13 +73,13 @@ checks:
 
 ## 扩展 API
 
-`ctx.engineeringReview.registerAdapter(adapter)` 注册一个可随 HMR 清理的适配器；`ctx.engineeringReview.review(request)` 运行共享且带缓存的引擎。适配器只能贡献风险信号、reviewer focus 和精确 argv 检查，不能直接产生 finding，因此正则或扩展名命中只能指导审查，不能宣布存在 bug。
+`ctx.engineeringReview.registerAdapter(adapter)` 注册一个可随 HMR 清理的适配器；`ctx.engineeringReview.review(request)` 运行共享且带缓存的引擎。适配器只能贡献风险信号、reviewer focus、精确 argv 检查和降级原因报告，不能直接产生 finding，因此正则或扩展名命中只能指导审查，不能宣布存在 bug。
 
 配套包 [`@deepseek-ai/dsh-engineering-review-hardware`](../engineering-review-hardware) 是首个适配器。它增加 C/C++／嵌入式与 Verilog/SystemVerilog 的审查重点，仅在已有 compilation database 时使用 `clang-tidy`，并且仅在已有或显式配置参数文件时使用 Verilator `--lint-only`。
 
 ## 持久化结果
 
-每个已审查 fingerprint 只追加一个精简的 `engineering-review/result` 日志事件。它保留 fingerprint、风险、通过状态、检查状态、简短 finding 标识／标题、类别／置信度、文件与行坐标以及降级原因；证据正文、大段 diff、分析器输出、reviewer prompt 和重复报告都不会持久化。包级 invariant 会验证 `passed` 恰好是必需检查 blocker 与 finding blocker 的反值。
+每个已审查 fingerprint 只追加一个精简的 `engineering-review/result` 日志事件。它保留 fingerprint、风险、通过状态、检查状态、简短 finding 标识／标题、类别／置信度、文件与行坐标、降级原因，以及紧凑的生命周期 id、结果、资源状态、受限事件和 incident；证据正文、大段 diff、分析器输出、reviewer prompt 和重复报告都不会持久化。包级 invariant 会验证 `passed` 恰好是必需检查 blocker 与 finding blocker 的反值。
 
 设计记录：[通用工程质量门禁](../../../.agents/notes/implemented/feature/2026-08-15-engineering-review-quality-gate.md)。服务参考：[工程质量审查子系统](../../../docs/subsystems/engineering-review.md)。
 
@@ -121,8 +129,9 @@ skill 目录会公开 `engineering-review`；只有模型加载该 skill 时，�
 
 ## 已知限制与暂缓事项
 
-- 非 Git 的 write/edit 跟踪只能观察成功的已注册工具调用；任意 shell 副作用会被有意归类为未知高风险，而不会尝试重建。
+- 非 Git 审查证据来自首次变更时的内容快照；同一轮内创建再删除的文件、以及无法读取的路径会产生空 diff 且不授予 reviewer 工具，这类变更只能根据 prompt 审查。任意 shell 副作用会被有意归类为未知高风险，而不会尝试重建。
 - Git 路径与 diff 上限保证工作量有界，但可能降低 reviewer 精度；超限仍会通过风险与截断标记显式呈现。
 - 自动标准检查发现有意保持很小。使用非标准构建图的项目应提交 `.dsh/engineering-review.yml`。
 - 可选分析器缺失时无法产生其领域诊断；主模型自审是可见的回退，而不是同等证据。
+- provider 未确认启动时，资源所有权保持 `unknown`；迟到 handle 会在 watcher 预算内继续清理，且不能延长 parent agent 路径。
 - reviewer 质量仍受模型影响。稳定 blocker 策略限制升级范围；仍需持续通过前向评测衡量不同领域的召回率与误判 blocker 比例。

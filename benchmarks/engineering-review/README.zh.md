@@ -26,6 +26,18 @@ pnpm exec tsx benchmarks/engineering-review/src/cli.ts calibrate --runs 3 --vari
 
 可以使用 `node node_modules/vitest/vitest.mjs run --config benchmarks/engineering-review/vitest.config.ts` 显式运行 benchmark 自有的 keyless 协议与评分器测试。
 
+无需任何模型成本即可从既有校准工件重新生成确定性的实验报告：
+
+```sh
+pnpm exec tsx benchmarks/engineering-review/src/cli.ts report
+```
+
+该命令扫描 `.artifacts/engineering-review-bench/` 下的 calibrate 批次，把每个 cell 归一化成一条 ML-实验记录
+（`results.csv` 每个 cell 一行；`results.json` 记录与头条聚合），并写出回答成本、延迟、价值与风险的人类可读报告
+（`report.md`）。头条聚合只使用加固后的干净 revision `23bbce1d` 批次；较旧的 `47f94385` 开发期 pilot 批次保留在
+原始数据中但不计入头条数字。报告刻意框定为实验快照：仅检测（Repair Success 属于独立的 Correction benchmark）、
+与模型和 revision 相关，并可用上述单条命令复现。
+
 不要把小规模 pilot 当作发布证据。对资源生命周期一般题、重试／幂等组合题和 HDL 位宽拔高题各进行一次 review-only 校准后，三个 treatment 样本的 gate Recall 与 Precision 均为 1。Treatment 都增加一次 reviewer 调用，分别耗时 29.2、35.5 与 37.6 秒；对应 Control 分别为 10.8、15.0 与 19.6 秒。工具尝试记录还显示，root 模型可能无视任务禁令而尝试已禁用的手动审查工具；该尝试不计为 reviewer 调用。这些随机样本验证了分层路径并暴露协议行为，但在提出发布结论前，仍需重复的配对 A/B 采样。
 
 2026-08-15 的六 case 配对 A/B 采样（每单元一次）覆盖两个 standard（embedded-uart-timeout、embedded-isr-event-loss）、三个 combined（backend-retry-idempotency、embedded-dma-buffer-lifetime、hdl-clock-domain-crossing）与一个 advanced（hdl-expression-width）case。两种条件下最终结果 Recall 均为 6/6。Treatment 的 False Block 为 0/6，而 Control 为 3/6：门禁的高置信度＋变更行 admission 规则过滤掉了裸模型在 retry、DMA、ISR 三个 fixed 变体上的误报 high/critical，且 treatment 在 retry 与 ISR 上的 finding precision 从 0.5 提升到 1。唯一一次门禁漏报发生在 DMA case，原因值得记录：fast reviewer 的 prompt 里同时收到了有界 diff 与任务要求——包括任务声明的保留契约（"platform_dma_start retains the supplied buffer until dma_send_complete"，经 reviewer prompt 的任务要求段传入）——却仍然返回空 findings，而读取了文件的 root 模型抓到了栈生命周期 bug。因此这次漏报是 reviewer 行为问题而非信息访问问题：文件访问不会改变 reviewer 看到的内容。记录的优化方向：强化 reviewer prompt，要求逐条把任务声明的要求对照变更行检查并接纳高置信度违规；任何改动都必须用配对 A/B 协议重新测量，因为放宽 admission 有可能在目前保持干净的 fixed 变体上抬高 False Block。
