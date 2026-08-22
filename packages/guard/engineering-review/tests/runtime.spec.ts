@@ -527,6 +527,80 @@ describe('engineering review runtime', () => {
     expect(starts).toBe(0)
   })
 
+  it('keeps ordinary multi-line automatic code edits on checks-only', async () => {
+    const { ctx, agent, cwd } = await setup()
+    let starts = 0
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start() { starts += 1; throw new Error('ordinary code edit must not start a reviewer') },
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'ordinary-multi-line-edit'),
+      automatic: true,
+      changedPaths: ['driver.c'],
+      diff: 'diff --git a/driver.c b/driver.c\n+++ b/driver.c\n@@ -1,2 +1,4 @@\n+int first = 1;\n+int second = 2;',
+    })
+    expect(report).toMatchObject({ route: 'checks-only', risk: 'medium', reviewer: { used: false } })
+    expect(starts).toBe(0)
+  })
+
+  it('dispatches fast review when a changed code line carries risk evidence', async () => {
+    const { ctx, agent, cwd } = await setup({ riskThreshold: 'medium' })
+    let starts = 0
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start() {
+        starts += 1
+        return Promise.resolve({
+          id: SessionId('engineering-review-risk-child'),
+          localAgent: undefined,
+          result: Promise.resolve({ stopReason: 'completed' as const, output: [], structured: { findings: [] } }),
+          dispose: () => Promise.resolve(),
+        })
+      },
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'risk-evidence'),
+      automatic: true,
+      changedPaths: ['driver.c'],
+      diff: 'diff --git a/driver.c b/driver.c\n+++ b/driver.c\n@@ -1 +1 @@\n+timeout();',
+    })
+    expect(report).toMatchObject({ route: 'fast', risk: 'medium', reviewer: { used: true } })
+    expect(starts).toBe(1)
+  })
+
+  it('times out and disposes a reviewer that never settles', async () => {
+    const { ctx, agent, cwd } = await setup({ reviewerTimeoutMs: 20 })
+    let disposed = false
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start(request) {
+        const result = new Promise<never>((_resolve, reject) => {
+          request.signal.addEventListener('abort', () => { reject(new Error('reviewer aborted')) }, { once: true })
+        })
+        return Promise.resolve({
+          id: SessionId('engineering-review-timeout-child'),
+          localAgent: undefined,
+          result,
+          dispose: () => { disposed = true; return Promise.resolve() },
+        })
+      },
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'reviewer-timeout'),
+      depth: 'deep',
+      changedPaths: ['driver.c'],
+    })
+    expect(report).toMatchObject({ route: 'deep', reviewer: { used: false, degradedReason: 'engineering reviewer timed out after 20ms' } })
+    expect(report.degradedReasons).toContain('independent reviewer unavailable: engineering reviewer timed out after 20ms')
+    expect(disposed).toBe(true)
+  })
   it('does not dispatch a reviewer after a required check fails', async () => {
     const { ctx, agent, cwd } = await setup({ riskThreshold: 'low' })
     let starts = 0
