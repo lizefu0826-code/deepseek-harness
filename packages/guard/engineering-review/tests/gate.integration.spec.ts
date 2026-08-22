@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, CallId } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -43,6 +44,7 @@ class StructuredReviewer implements SubagentProvider {
     }],
     private readonly stopReason: 'completed' | 'error' = 'completed',
     private readonly firstStopsMaxTokens = false,
+    private readonly localAgent?: Agent,
   ) {}
   start(request: ResolvedSubagentStartRequest) {
     this.starts += 1
@@ -51,7 +53,7 @@ class StructuredReviewer implements SubagentProvider {
     const stopReason: SubagentStopReason = truncated ? 'max-tokens' : this.stopReason
     return Promise.resolve({
       id: SessionId('engineering-review-child'),
-      localAgent: undefined,
+      localAgent: this.localAgent,
       result: Promise.resolve({
         stopReason,
         output: [],
@@ -1176,6 +1178,10 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
+    ctx.engineeringReview.registerAdapter({
+      id: 'effort-risk',
+      contribute: () => Promise.resolve({ riskSignals: [{ risk: 'high', reason: 'exercise child request routing' }] }),
+    })
     // Capture the agent/request waterfall listener the reviewer installs on its
     // child so the test can assert the pinned reasoning effort.
     const requestListeners: Array<

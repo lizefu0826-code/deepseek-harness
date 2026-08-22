@@ -3,6 +3,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
