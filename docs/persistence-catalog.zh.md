@@ -393,8 +393,17 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ### `engineering-review/*`
 
-<a id="engineering-reviewresult--log-only"></a>
+<a id="engineering-reviewlifecycle--log-only"></a>
+#### `engineering-review/lifecycle` — 仅日志
 
+```ts persistence-catalog
+/** Lifecycle events remain durable after the business result is returned. */
+'engineering-review/lifecycle': EngineeringReviewLifecycleLogData
+```
+
+来源：[`packages/guard/engineering-review/src/types.ts:173`](../packages/guard/engineering-review/src/types.ts)
+
+<a id="engineering-reviewresult--log-only"></a>
 #### `engineering-review/result` — 仅日志
 
 ```ts persistence-catalog
@@ -402,7 +411,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'engineering-review/result': EngineeringReviewLogData
 ```
 
-来源：[`packages/guard/engineering-review/src/types.ts:144`](../packages/guard/engineering-review/src/types.ts)
+来源：[`packages/guard/engineering-review/src/types.ts:171`](../packages/guard/engineering-review/src/types.ts)
 
 ### `feedback/*`
 
