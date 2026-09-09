@@ -10,6 +10,10 @@ DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的�
 
 DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
 
+## 工程审查插件
+
+本 fork 已发布 [Engineering Review v0.2 RC 1](https://github.com/lizefu0826-code/deepseek-harness/releases/tag/engineering-review-v0.2-rc.1)。这是一个按需启用的质量门禁，会在 agent 完成工程任务前运行项目已有的确定性检查和基于风险的隔离审查。使用方法见[插件指南](packages/guard/engineering-review/README.md)和可选的[硬件适配器](packages/guard/engineering-review-hardware/README.md)。
+
 ## 运行
 
 ### 通过 `npm` 运行
