@@ -616,13 +616,35 @@ export interface Config {
   readonly reviewerModel?: string
   /** Maximum output tokens for each isolated reviewer request (default 8192). */
   readonly reviewerMaxTokens?: number
+  /** Maximum UTF-8 bytes in one isolated reviewer prompt (default 128 KiB). */
+  readonly maxReviewContextBytes?: number
+  /** Wall-clock deadline for one isolated reviewer attempt (default 60000). */
+  readonly reviewerTimeoutMs?: number
+  /** Deadline for reviewer preparation (default 5000). */
+  readonly prepareTimeoutMs?: number
+  /** Deadline for provider startup (default 10000). */
+  readonly startTimeoutMs?: number
+  /** Deadline for reclaiming a late provider handle (default 30000). */
+  readonly spawnWatcherTimeoutMs?: number
+  /** Deadline for model execution (default 60000). */
+  readonly executionTimeoutMs?: number
+  /** Deadline for reviewer cleanup (default 5000). */
+  readonly disposeTimeoutMs?: number
+  /** Total reviewer lifecycle deadline (default 90000). */
+  readonly totalTimeoutMs?: number
+  /** Maximum lifecycle events retained per reviewer (default 32). */
+  readonly maxDiagnosticEvents?: number
+  /** Maximum lifecycle incidents retained per reviewer (default 32). */
+  readonly maxDiagnosticIncidents?: number
+  /** Aggregate UTF-8 diagnostic budget per reviewer (default 8192). */
+  readonly maxDiagnosticBytes?: number
 }
 
 /** Ordered engineering risk used by adapters and review policy. */
 export type EngineeringRisk = 'low' | 'medium' | 'high'
 ```
 
-来源：[`packages/guard/engineering-review/src/index.ts:76`](../packages/guard/engineering-review/src/index.ts)
+来源：[`packages/guard/engineering-review/src/index.ts:96`](../packages/guard/engineering-review/src/index.ts)
 
 <a id="deepseek-aidsh-engineering-review-hardware"></a>
 

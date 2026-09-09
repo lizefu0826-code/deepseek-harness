@@ -14,5 +14,6 @@
         # its OUTPUT budget on large diffs and stop with "max-tokens" before
         # emitting structured findings, degrading the gate to self-review.
         reviewerMaxTokens: 8192
+        maxReviewContextBytes: 131072
     - id: engineering-review-hardware
       name: '@deepseek-ai/dsh-engineering-review-hardware'

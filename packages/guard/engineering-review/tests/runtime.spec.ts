@@ -513,4 +513,134 @@ describe('engineering review runtime', () => {
     const report = await ctx.engineeringReview.review(request(agent, cwd, 'file-cwd'))
     expect(report.checks[0]).toMatchObject({ status: 'unavailable' })
   })
+  it('keeps low-risk changes on the checks-only route', async () => {
+    const { ctx, agent, cwd } = await setup()
+    let starts = 0
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start() { starts += 1; throw new Error('reviewer must not start for low risk') },
+    })
+    const report = await ctx.engineeringReview.review(request(agent, cwd, 'low-risk'))
+    expect(report).toMatchObject({ route: 'checks-only', risk: 'low', passed: true, reviewer: { used: false } })
+    expect(starts).toBe(0)
+  })
+
+  it('keeps ordinary multi-line automatic code edits on checks-only', async () => {
+    const { ctx, agent, cwd } = await setup()
+    let starts = 0
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start() { starts += 1; throw new Error('ordinary code edit must not start a reviewer') },
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'ordinary-multi-line-edit'),
+      automatic: true,
+      changedPaths: ['driver.c'],
+      diff: 'diff --git a/driver.c b/driver.c\n+++ b/driver.c\n@@ -1,2 +1,4 @@\n+int first = 1;\n+int second = 2;',
+    })
+    expect(report).toMatchObject({ route: 'checks-only', risk: 'medium', reviewer: { used: false } })
+    expect(starts).toBe(0)
+  })
+
+  it('dispatches fast review when a changed code line carries risk evidence', async () => {
+    const { ctx, agent, cwd } = await setup({ riskThreshold: 'medium' })
+    let starts = 0
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start() {
+        starts += 1
+        return Promise.resolve({
+          id: SessionId('engineering-review-risk-child'),
+          localAgent: undefined,
+          result: Promise.resolve({ stopReason: 'completed' as const, output: [], structured: { findings: [] } }),
+          dispose: () => Promise.resolve(),
+        })
+      },
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'risk-evidence'),
+      automatic: true,
+      changedPaths: ['driver.c'],
+      diff: 'diff --git a/driver.c b/driver.c\n+++ b/driver.c\n@@ -1 +1 @@\n+timeout();',
+    })
+    expect(report).toMatchObject({ route: 'fast', risk: 'medium', reviewer: { used: true } })
+    expect(starts).toBe(1)
+  })
+
+  it('times out and disposes a reviewer that never settles', async () => {
+    const { ctx, agent, cwd } = await setup({ reviewerTimeoutMs: 20 })
+    let disposed = false
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start(request) {
+        const result = new Promise<never>((_resolve, reject) => {
+          request.signal.addEventListener('abort', () => { reject(new Error('reviewer aborted')) }, { once: true })
+        })
+        return Promise.resolve({
+          id: SessionId('engineering-review-timeout-child'),
+          localAgent: undefined,
+          result,
+          dispose: () => { disposed = true; return Promise.resolve() },
+        })
+      },
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'reviewer-timeout'),
+      depth: 'deep',
+      changedPaths: ['driver.c'],
+    })
+    expect(report).toMatchObject({ route: 'deep', reviewer: { used: false, degradedReason: 'engineering reviewer timed out after 20ms' } })
+    expect(report.degradedReasons).toContain('independent reviewer unavailable: engineering reviewer timed out after 20ms')
+    expect(disposed).toBe(true)
+  })
+  it('does not dispatch a reviewer after a required check fails', async () => {
+    const { ctx, agent, cwd } = await setup({ riskThreshold: 'low' })
+    let starts = 0
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start() { starts += 1; throw new Error('required check failure must short-circuit review') },
+    })
+    ctx.engineeringReview.registerAdapter({
+      id: 'required-failure-route',
+      contribute: () => Promise.resolve({
+        checks: [{ id: 'required:failure', argv: [process.execPath, '-e', 'process.exit(7)'], required: true }],
+      }),
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'required-failure-route'),
+      changedPaths: ['driver.c'],
+      depth: 'deep',
+    })
+    expect(report.route).toBe('checks-only')
+    expect(report.passed).toBe(false)
+    expect(starts).toBe(0)
+  })
+  it('keeps a tiny automatic code edit on checks-only', async () => {
+    const { ctx, agent, cwd } = await setup({ riskThreshold: 'low' })
+    let starts = 0
+    ctx.subagents.registerProvider({
+      name: 'spawn',
+      capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+      inheritsParentContext: false,
+      start() { starts += 1; throw new Error('tiny automatic edit must not start a reviewer') },
+    })
+    const report = await ctx.engineeringReview.review({
+      ...request(agent, cwd, 'tiny-automatic-edit'),
+      automatic: true,
+      changedPaths: ['driver.c'],
+      diff: 'diff --git a/driver.c b/driver.c\n+++ b/driver.c\n@@ -1 +1 @@\n+int driver(void) { return 0; }',
+    })
+    expect(report).toMatchObject({ route: 'checks-only', risk: 'medium', passed: true, reviewer: { used: false } })
+    expect(starts).toBe(0)
+  })
 })

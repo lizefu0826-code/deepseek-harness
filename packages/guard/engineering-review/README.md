@@ -6,9 +6,23 @@ An opt-in engineering quality gate for DeepSeek Harness. It records the current 
 
 > **Experimental test release:** enable this package explicitly and validate its findings against project-owned checks. Its configuration and review behavior may change before the first stable release.
 
+## Install
+
+The package is not published to npm yet. Install the fixed release artifact directly from GitHub:
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
+```
+
+The tarball declares the matching DeepSeek Harness packages as peer dependencies. Add the optional hardware adapter from the same release when the workspace contains C, C++, embedded, Verilog, or SystemVerilog code:
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
+```
+
 ## Composition
 
-Mount the service after the agent, filesystem, subprocess, skill, tool, and subagent services. The default reviewer provider is the fresh one-shot `spawn` backend; the reviewer inherits the parent agent's LLM provider and model unless `reviewerProvider` or `reviewerModel` is configured. Each reviewer request has an independent `reviewerMaxTokens` output cap, defaulting to 8192.
+Mount the service after the agent, filesystem, subprocess, skill, tool, and subagent services. The default reviewer provider is the fresh one-shot `spawn` backend; the reviewer inherits the parent agent's LLM provider and model unless `reviewerProvider` or `reviewerModel` is configured. Each reviewer request has an independent `reviewerMaxTokens` output cap, defaulting to 8192, a total `maxReviewContextBytes` input budget, defaulting to 128 KiB, and a `reviewerTimeoutMs` wall-clock deadline, defaulting to 60000 ms. The lifecycle also bounds preparation (`prepareTimeoutMs`, 5000 ms), provider startup (`startTimeoutMs`, 10000 ms), late-handle reclamation (`spawnWatcherTimeoutMs`, 30000 ms), cleanup (`disposeTimeoutMs`, 5000 ms), and the total reviewer path (`totalTimeoutMs`, 90000 ms). The total deadline always wins.
 
 ```yaml
 - id: engineering-review
@@ -22,6 +36,14 @@ Mount the service after the agent, filesystem, subprocess, skill, tool, and suba
     checkTimeoutMs: 120000
     subagentProvider: spawn
     reviewerMaxTokens: 8192
+    maxReviewContextBytes: 131072
+    reviewerTimeoutMs: 60000
+    prepareTimeoutMs: 5000
+    startTimeoutMs: 10000
+    spawnWatcherTimeoutMs: 30000
+    executionTimeoutMs: 60000
+    disposeTimeoutMs: 5000
+    totalTimeoutMs: 90000
 ```
 
 The package registers `ctx.engineeringReview`, the `engineering_review` tool, and the `engineering-review` skill. A project-level `.dsh/skills/engineering-review` overrides the bundled skill through the normal skill precedence rules. The detailed rubric remains a package-owned skill reference and is supplied directly to the isolated reviewer.
@@ -38,10 +60,9 @@ Explicit `.dsh/engineering-review.yml` checks take precedence over conservative 
 
 Warnings do not prevent completion. A required check that fails or is unavailable, or a reviewer finding whose source severity is critical/high with high confidence, becomes a blocker. Optional analyzer failures and reviewer failures are non-blocking degradation: the runtime explicitly steers one rubric-based self-review to the main agent. Blockers steer correction back to the same agent. After `maxCorrectionPasses`, the runtime requests one final evidence report and allows the next stopping boundary to finish, preventing an infinite loop. Setting the correction budget to zero selects report-only behavior: the first blocker requests the final report without authorizing a repair pass.
 
-The independent reviewer is a fresh one-shot child with no inherited conversation reasoning. It receives at most 16 KiB of text from the latest direct user task, plus bounded change evidence, checks, project instructions, the winning skill, and the rubric. Agent output and plugin steering are excluded from the task projection. A fast review with a complete diff gets no navigation tools; deep review or a truncated diff may use available read-only file, image, LSP, and Git navigation tools. The reviewer cannot invoke write, edit, shell, terminal, deployment, or automatic-fix tools. `reviewerMaxTokens` bounds each child request even when the parent route has a larger provider default.
+The independent reviewer is a fresh one-shot child with no inherited conversation reasoning. It receives at most 16 KiB of text from the latest direct user task, plus bounded change evidence, checks, project instructions, the winning skill, and the rubric. Agent output and plugin steering are excluded from the task projection. The prompt requires the final message to be exactly the structured JSON object with no prose, and file inspection is limited to verifying a specific candidate. The automatic gate runs deterministic checks first, then selects `checks-only`, `fast`, or `deep`: low risk stays checks-only, a complete single-line ordinary edit stays checks-only, medium risk with generic or adapter risk evidence uses a compact fast prompt; ordinary code edits without such evidence stay checks-only. High risk, unknown shell scope, or truncated evidence uses deep. A required check failure is reported without dispatching a reviewer. Fast review with a complete diff gets no navigation tools; deep review uses available read-only file, image, LSP, and Git navigation tools. The reviewer cannot invoke write, edit, shell, terminal, deployment, or automatic-fix tools. `reviewerMaxTokens` bounds each child request even when the parent route has a larger provider default, and `reviewerTimeoutMs` aborts a child that exceeds its execution deadline before degrading to self-review. Preparation, startup, execution, and cleanup are independently bounded by the lifecycle budgets; cleanup is best-effort and never replaces a valid review result. A startup timeout transfers ownership to a bounded watcher: a handle that arrives late is disposed, while an unconfirmed provider remains `unknown` rather than being reported as a confirmed leak. Lifecycle diagnostics include a correlation id, bounded events, incidents, outcome, and resource state.
 
-The runtime admits only high-confidence critical/high candidates that cite at least one changed file line. Lower-confidence candidates, low/medium advice, diagnostics preferences, API-style suggestions, optional hardening, and candidates evidenced only outside the change do not enter the report. The structured schema limits category to a stable engineering taxonomy covering concurrency, lifecycle, recovery, data integrity, real-time behavior, state and compatibility, safety, verification, and HDL-specific clock/reset/CDC and width/sequential semantics. Admitted findings also carry confidence, file and line evidence, impact, recommendation, and validation; the runtime generates stable ids and maps every admitted candidate to a blocker.
-
+The runtime admits only high-confidence critical/high candidates that cite at least one changed file line falling inside the changed diff hunks (line-level admission; a truncated or absent diff falls back to file-level admission). Lower-confidence candidates, low/medium advice, diagnostics preferences, API-style suggestions, optional hardening, and candidates evidenced only outside the change do not enter the report. The structured schema limits category to a stable engineering taxonomy covering concurrency, lifecycle, recovery, data integrity, real-time behavior, state and compatibility, safety, verification, and HDL-specific clock/reset/CDC and width/sequential semantics. Admitted findings also carry confidence, file and line evidence, impact, recommendation, and validation; the runtime generates stable ids and maps every admitted candidate to a blocker.
 ## Project checks
 
 The project file is versioned and contains only data, never a shell string:
@@ -71,7 +92,7 @@ The companion package [`@deepseek-ai/dsh-engineering-review-hardware`](../engine
 
 ## Durable result
 
-One compact `engineering-review/result` log event is appended per reviewed fingerprint. It retains the fingerprint, risk, pass/fail state, check statuses, short finding identities/titles, category/confidence, file-and-line coordinates, and degradation reasons. Evidence prose, large diffs, analyzer output, reviewer prompts, and repeated reports are deliberately excluded. The package invariant verifies that `passed` is exactly the inverse of required-check and finding blockers.
+One compact `engineering-review/result` log event is appended per reviewed fingerprint. It retains the fingerprint, risk, pass/fail state, check statuses, short finding identities/titles, category/confidence, file-and-line coordinates, degradation reasons, and compact lifecycle id/outcome/resource diagnostics. Evidence prose, large diffs, analyzer output, reviewer prompts, and repeated reports are deliberately excluded. The package invariant verifies that `passed` is exactly the inverse of required-check and finding blockers.
 
 Design: [generic engineering quality gate](../../../.agents/notes/implemented/feature/2026-08-15-engineering-review-quality-gate.md). Service reference: [engineering review subsystem](../../../docs/subsystems/engineering-review.md).
 
@@ -125,4 +146,5 @@ Loading the skill or receiving a gate message extends the parent conversation. R
 - Git path and diff caps preserve bounded work but can reduce reviewer precision; overflow remains visible through risk and truncation markers.
 - Automatic standard-check discovery is intentionally small. Projects with nonstandard build graphs should commit `.dsh/engineering-review.yml`.
 - A missing optional analyzer cannot produce its domain-specific diagnostics; the main-model self-review is a visible fallback, not equivalent evidence.
+- A provider that does not confirm startup leaves resource ownership `unknown`; late-handle cleanup continues under its watcher budget and cannot extend the parent agent path.
 - Reviewer quality remains model-dependent. Stable blocker policy limits escalation, while forward evaluations must continue to measure recall and false blockers across domains.

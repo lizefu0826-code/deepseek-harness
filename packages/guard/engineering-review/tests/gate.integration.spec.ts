@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, CallId } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -43,6 +44,7 @@ class StructuredReviewer implements SubagentProvider {
     }],
     private readonly stopReason: 'completed' | 'error' = 'completed',
     private readonly firstStopsMaxTokens = false,
+    private readonly localAgent?: Agent,
   ) {}
   start(request: ResolvedSubagentStartRequest) {
     this.starts += 1
@@ -51,7 +53,7 @@ class StructuredReviewer implements SubagentProvider {
     const stopReason: SubagentStopReason = truncated ? 'max-tokens' : this.stopReason
     return Promise.resolve({
       id: SessionId('engineering-review-child'),
-      localAgent: undefined,
+      localAgent: this.localAgent,
       result: Promise.resolve({
         stopReason,
         output: [],
@@ -76,7 +78,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([{
       category: 'observability-and-verification', severity: 'high', confidence: 'medium', title: 'Sparse timeout context',
       evidence: [{ path: 'driver.c', line: 12, detail: 'The timeout path omits the device identifier.' }],
@@ -125,7 +127,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
@@ -159,7 +161,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    const reviewPlugin = ctx.plugin(EngineeringReviewRuntime, { maxCorrectionPasses: 2 })
+    const reviewPlugin = ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low', maxCorrectionPasses: 2 })
     await reviewPlugin
     const reviewer = new StructuredReviewer()
     ctx.subagents.registerProvider(reviewer)
@@ -221,7 +223,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime, { reviewerMaxTokens: 2_048 })
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low', reviewerMaxTokens: 2_048, maxReviewContextBytes: 2_048 })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
@@ -245,7 +247,12 @@ describe('automatic engineering review gate', () => {
       provider: 'mock',
       model: 'mock',
       maxTokens: 2_048,
+      reasoningEffort: 'off',
     })
+    const promptBlock = reviewer.lastRequest?.prompt[0]
+    expect(promptBlock?.type).toBe('text')
+    if (promptBlock?.type !== 'text') throw new Error('reviewer prompt must be text')
+    expect(Buffer.byteLength(promptBlock.text)).toBeLessThanOrEqual(2_048)
     // The automatic review of the fake write has no readable change, so it
     // gets no tools; the manual reviews below pin the fast/deep tool split.
     expect(reviewer.lastRequest?.toolFilter).toEqual({ allow: [] })
@@ -288,7 +295,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     const adapter: EngineeringReviewAdapter = {
@@ -377,7 +384,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime, { maxCorrectionPasses: 1 })
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low', maxCorrectionPasses: 1 })
     const reviewer = new StructuredReviewer()
     ctx.subagents.registerProvider(reviewer)
     let writes = 0
@@ -468,13 +475,13 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
       name: 'write', description: 'test write', parameters: { path: { type: 'string', required: true } },
       async execute(args) {
-        await writeFile(join(workspace, args.path), 'int changed(void) { return 1; }\n')
+        await writeFile(join(workspace, args.path), 'int changed(void) { return 1; }\nvoid helper(void) { return 0; }\n')
         return [{ type: 'text', text: 'written' }]
       },
     }))
@@ -499,7 +506,7 @@ describe('automatic engineering review gate', () => {
   it('diffs the full turn change from first-mutation content', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'dsh-engineering-review-diff-full-'))
     temporaryDirectories.push(workspace)
-    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\n', 'utf8')
+    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\nvoid helper(void) { return 0; }\n', 'utf8')
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(LocalFileSystem, { cwd: workspace })
@@ -507,20 +514,20 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
       name: 'write', description: 'test write', parameters: { path: { type: 'string', required: true } },
       async execute(args) {
-        await writeFile(join(workspace, args.path), 'int v1(void) { return 1; }\n')
+        await writeFile(join(workspace, args.path), 'int v1(void) { return 1; }\nvoid helper(void) { return 0; }\n')
         return [{ type: 'text', text: 'written' }]
       },
     }))
     ctx.tools.register(defineContentToolFixture({
       name: 'edit', description: 'test edit', parameters: { path: { type: 'string', required: true } },
       async execute(args) {
-        await writeFile(join(workspace, args.path), 'int v2(void) { return 2; }\n')
+        await writeFile(join(workspace, args.path), 'int v2(void) { return 2; }\nvoid helper(void) { return 2; }\n')
         return [{ type: 'text', text: 'edited' }]
       },
     }))
@@ -546,7 +553,7 @@ describe('automatic engineering review gate', () => {
   it('diffs a deletion to nothing in non-Git reviews', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'dsh-engineering-review-diff-del-'))
     temporaryDirectories.push(workspace)
-    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\n', 'utf8')
+    await writeFile(join(workspace, 'driver.c'), 'int base(void) { return 0; }\nvoid helper(void) { return 0; }\n', 'utf8')
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(LocalFileSystem, { cwd: workspace })
@@ -554,7 +561,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     const { unlink } = await import('node:fs/promises')
@@ -748,7 +755,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([], 'error')
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
@@ -788,7 +795,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     // The first reviewer attempt exhausts its budget; the retry completes
     // with the default blocker finding.
     const reviewer = new StructuredReviewer(undefined, 'completed', true)
@@ -828,7 +835,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.engineeringReview.registerAdapter({
@@ -869,7 +876,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime, { maxCorrectionPasses: 1 })
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low', maxCorrectionPasses: 1 })
     const reviewer = new StructuredReviewer()
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
@@ -912,7 +919,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer()
     ctx.subagents.registerProvider(reviewer)
     const llm = new MockAdapter([
@@ -941,7 +948,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
@@ -1017,7 +1024,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime, { maxCorrectionPasses: 1 })
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low', maxCorrectionPasses: 1 })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.engineeringReview.registerAdapter({
@@ -1106,7 +1113,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer()
     ctx.subagents.registerProvider(reviewer)
     const llm = new MockAdapter([
@@ -1138,7 +1145,7 @@ describe('automatic engineering review gate', () => {
     await ctx.plugin(SkillRuntime)
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.plugin(EngineeringReviewRuntime)
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
     const reviewer = new StructuredReviewer([])
     ctx.subagents.registerProvider(reviewer)
     ctx.tools.register(defineContentToolFixture({
@@ -1159,4 +1166,58 @@ describe('automatic engineering review gate', () => {
     expect(results[0]?.data).toMatchObject({ passed: true, risk: 'low' })
     await ctx.fiber.dispose()
   })
-})
+
+  it('pins the reviewer child requests to reasoning effort off', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'dsh-engineering-review-effort-'))
+    temporaryDirectories.push(workspace)
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(LocalFileSystem, { cwd: workspace })
+    await ctx.plugin(LocalSubprocessRuntime)
+    await ctx.plugin(SkillRuntime)
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(EngineeringReviewRuntime, { riskThreshold: 'low' })
+    ctx.engineeringReview.registerAdapter({
+      id: 'effort-risk',
+      contribute: () => Promise.resolve({ riskSignals: [{ risk: 'high', reason: 'exercise child request routing' }] }),
+    })
+    // Capture the agent/request waterfall listener the reviewer installs on its
+    // child so the test can assert the pinned reasoning effort.
+    const requestListeners: Array<
+      (payload: unknown, next: () => Promise<Record<string, unknown>>) => Promise<Record<string, unknown>>
+    > = []
+    const localAgent = {
+      ctx: {
+        on(name: string, listener: (payload: unknown, next: () => Promise<Record<string, unknown>>) => Promise<Record<string, unknown>>) {
+          if (name === 'agent/request') requestListeners.push(listener)
+          return () => undefined
+        },
+      },
+    } as unknown as Agent
+    const reviewer = new StructuredReviewer([], 'completed', false, localAgent)
+    ctx.subagents.registerProvider(reviewer)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'write', description: 'test write', parameters: { path: { type: 'string', required: true } },
+      async execute() { return [{ type: 'text', text: 'written' }] },
+    }))
+    const llm = new MockAdapter([
+      toolCallResponse(CallId('effort-write'), 'write', { path: 'driver.c' }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], llm)
+    const agent = ctx.agentLoop.create(SessionId('engineering-effort'), { provider: 'mock', model: 'mock' }, { cwd: workspace })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'change the driver' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(requestListeners).toHaveLength(1)
+    const requestListener = requestListeners[0]
+    expect(requestListener).toBeDefined()
+    const config = await requestListener!({}, async () => ({ provider: 'mock', model: 'mock', reasoningEffort: 'high' }))
+    expect(config.reasoningEffort).toBe('off')
+    // The first child request has no persisted header, so the effort would be
+    // undefined and the adapter default would win; the pin must apply there too.
+    const plain = await requestListener!({}, async () => ({ provider: 'mock', model: 'mock' }))
+    expect(plain.reasoningEffort).toBe('off')
+    await ctx.fiber.dispose()
+  })})

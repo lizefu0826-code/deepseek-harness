@@ -391,6 +391,17 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 
 ### `engineering-review/*`
 
+<a id="engineering-reviewlifecycle--log-only"></a>
+
+#### `engineering-review/lifecycle` — log-only
+
+```ts persistence-catalog
+/** Lifecycle events remain durable after the business result is returned. */
+'engineering-review/lifecycle': EngineeringReviewLifecycleLogData
+```
+
+Source: [`packages/guard/engineering-review/src/types.ts:173`](../packages/guard/engineering-review/src/types.ts)
+
 <a id="engineering-reviewresult--log-only"></a>
 
 #### `engineering-review/result` — log-only
@@ -400,7 +411,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 'engineering-review/result': EngineeringReviewLogData
 ```
 
-Source: [`packages/guard/engineering-review/src/types.ts:144`](../packages/guard/engineering-review/src/types.ts)
+Source: [`packages/guard/engineering-review/src/types.ts:171`](../packages/guard/engineering-review/src/types.ts)
 
 ### `feedback/*`
 

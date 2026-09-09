@@ -1,12 +1,12 @@
 # Agent Note: 工程审查召回——reviewer 未应用任务声明的契约
 
-Status: proposed
+Status: implemented
 
 [English](2026-08-15-engineering-review-recall-diagnosis.md) | 中文
 
 ## 问题
 
-2026-08-15 的六 case 配对 A/B 校准（见 [benchmark README](../../../benchmarks/engineering-review/README.md)）暴露了门禁隔离 reviewer 的首次漏报，发生在 `embedded-dma-buffer-lifetime`：gate Recall 为 0，而最终结果仍然通过（root Recall 为 1）。漏掉的金标缺陷是栈局部帧缓冲区被异步 DMA 传输超期使用。
+2026-08-15 的六 case 配对 A/B 校准（见 [benchmark README](../../../../benchmarks/engineering-review/README.md)）暴露了门禁隔离 reviewer 的首次漏报，发生在 `embedded-dma-buffer-lifetime`：gate Recall 为 0，而最终结果仍然通过（root Recall 为 1）。漏掉的金标缺陷是栈局部帧缓冲区被异步 DMA 传输超期使用。
 
 本笔记的早期草稿把漏报归因于信息访问："fast 审查只看 diff，保留契约在 diff 之外。"该诊断与 prompt 构造矛盾，已被修正。fast reviewer 的 prompt 包含 `User task requirements:` 段（`reviewer.ts` 的 `reviewerPrompt`），由 `latestUserTask` 从 root 模型的用户消息填充；benchmark 把完整 `task.md` 文本作为该消息传入（`cli.ts` 校准任务组装），因此 reviewer 收到的就是逐字声明的契约（"platform_dma_start retains the supplied buffer until dma_send_complete is called"）加上有界 diff。它仍然返回空 findings（子代理输出 193 tokens，`findings: []`）。因此这次漏报是 reviewer 行为问题——reviewer 没有把任务声明的契约应用到变更行上——而非信息访问问题；授予文件访问不会改变 reviewer 看到的内容。
 
@@ -17,11 +17,11 @@ Status: proposed
 - `benchmarks/engineering-review/cases/embedded-dma-buffer-lifetime/buggy.patch`——帧缓冲区为栈局部；`platform_dma_start(frame, length)` 在 `dma_send_complete` 之前一直持有它。
 - `.artifacts/engineering-review-bench/2026-08-15T153825-336Z-*/embedded-dma-buffer-lifetime/buggy/run-1/treatment/result.json`——`gateBugRecall: 0`，reviewer 子代理输出 193 tokens，`engineeringResults[0].findings: []`；root 模型命中了金标。
 
-## 提案
+## 决策
 
-1. **在 reviewer prompt 中强调契约应用。** 指示 reviewer 逐条把任务声明的要求对照变更行检查，并在"任务契约＋变更行"共同构成违规证据时接纳高置信度 finding。这直接针对观察到的行为：reviewer 拿到了契约却没有应用它。
-2. **采纳前先测量。** 任何放宽 reviewer 行为都是 Recall/False-Block 权衡。需用配对 A/B 协议在 DMA case 以及当前保持 False Block 0 的 fixed 变体（retry、DMA、ISR）上验证——benchmark 已同时评分两者。
-3. 可选：在未来的运行中为 reviewer 子代理持久化 prompt/session，直接确认 prompt 内容，而不是仅依赖代码路径推理。
+1. **将 DMA 漏报归类为 reviewer 行为局限。** reviewer 已拿到任务契约和有界 diff，因此扩大文件访问不是修正措施。
+2. **把契约应用强调保留为待测后续。** 任何 prompt 改动都必须用 DMA case 及当前 False Block 为 0 的 fixed 变体进行配对 A/B 评估。
+3. **保留 prompt/session 观测选项。** 后续 benchmark 可以持久化 reviewer 输入和会话，以直接验证观察到的行为。
 
 ## 曾考虑的替代方案
 
@@ -29,9 +29,9 @@ Status: proposed
 - 提高 reviewer 输出上限：不能解决这次漏报——reviewer 以 193 tokens 正常完成。
 - 保持现状：保住强 False Block 战绩，但把 DMA 类漏报留给 root 模型。
 
-## 后果（若采纳）
+## 后果
 
-门禁在契约密集的 case 上 Recall 提升，同时必须重新测量当前保持干净的 fixed 变体上的 False Block。benchmark 自带的 control/treatment 配对评分同时覆盖两者。
+本笔记记录 reviewer 行为局限和可测量的后续方向；benchmark 的 control/treatment 配对评分同时覆盖 Recall 与 False Block。
 
 ## 补充观察：无 diff（非 Git）会话上的 reviewer 输出预算问题
 

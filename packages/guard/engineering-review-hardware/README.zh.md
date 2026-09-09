@@ -6,6 +6,14 @@
 
 > **实验性测试版本：**请将本适配器与实验性 engineering-review 包配套使用，并使用项目自身工具链验证分析器结果。
 
+## 安装
+
+请先安装核心包，再添加公开 Release 中的固定版本适配器产物：
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
+```
+
 ## 配置与行为
 
 ```yaml

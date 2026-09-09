@@ -6,9 +6,23 @@
 
 > **实验性测试版本：**请显式启用本包，并使用项目拥有的检查验证其 finding。首次稳定发布前，配置和审查行为可能变化。
 
+## 安装
+
+本包尚未发布到 npm。请直接安装 GitHub Release 中的固定版本产物：
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
+```
+
+该 tarball 会把版本匹配的 DeepSeek Harness 包声明为 peer dependency。如果工作区包含 C、C++、嵌入式、Verilog 或 SystemVerilog 代码，可从同一 Release 安装可选硬件适配器：
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
+```
+
 ## 组合方式
 
-请在 agent、文件系统、子进程、skill、tool 和 subagent 服务之后挂载本服务。默认 reviewer 使用全新的 one-shot `spawn` 后端；如果没有配置 `reviewerProvider` 或 `reviewerModel`，则继承父 agent 的 LLM provider 和 model。每次 reviewer 请求都受独立的 `reviewerMaxTokens` 输出上限约束，默认值为 8192。
+请在 agent、文件系统、子进程、skill、tool 和 subagent 服务之后挂载本服务。默认 reviewer 使用全新的 one-shot `spawn` 后端；如果没有配置 `reviewerProvider` 或 `reviewerModel`，则继承父 agent 的 LLM provider 和 model。每次 reviewer 请求都受独立的 `reviewerMaxTokens` 输出上限约束（默认 8192）、`maxReviewContextBytes` 输入预算（默认 128 KiB）和 `reviewerTimeoutMs` 墙钟时限（默认 60000 ms）约束。生命周期还分别限制准备阶段（`prepareTimeoutMs`，5000 毫秒）、provider 启动（`startTimeoutMs`，10000 毫秒）、迟到 handle 回收（`spawnWatcherTimeoutMs`，30000 毫秒）、清理（`disposeTimeoutMs`，5000 毫秒）和 reviewer 总路径（`totalTimeoutMs`，90000 毫秒）；总 deadline 始终优先。
 
 ```yaml
 - id: engineering-review
@@ -22,6 +36,14 @@
     checkTimeoutMs: 120000
     subagentProvider: spawn
     reviewerMaxTokens: 8192
+    maxReviewContextBytes: 131072
+    reviewerTimeoutMs: 60000
+    prepareTimeoutMs: 5000
+    startTimeoutMs: 10000
+    spawnWatcherTimeoutMs: 30000
+    executionTimeoutMs: 60000
+    disposeTimeoutMs: 5000
+    totalTimeoutMs: 90000
 ```
 
 本包会注册 `ctx.engineeringReview`、`engineering_review` 工具和 `engineering-review` skill。项目级 `.dsh/skills/engineering-review` 会按正常的 skill 优先级覆盖内置 skill。详细 rubric 保留在包内的 skill reference 中，并直接提供给隔离 reviewer。
@@ -38,10 +60,9 @@
 
 warning 不会阻止结束。必需检查失败或不可用，或者 reviewer 给出 critical/high 且高置信度的发现，才形成 blocker。可选分析器或 reviewer 故障属于非阻塞降级：运行时会明确要求主 agent 完成一次基于 rubric 的自审。blocker 会被送回同一个 agent 修正。达到 `maxCorrectionPasses` 后，运行时只再要求一次最终证据报告，并允许下一个停止边界正常结束，从而避免无限循环。把修正预算设为零会启用只报告行为：首个 blocker 会直接请求最终报告，不会授权修复轮次。
 
-独立 reviewer 是一个全新的 one-shot 子 agent，不继承父会话的推理历史。它接收最近一条直接用户任务中最多 16 KiB 的文本，以及受限的变更证据、检查结果、项目指令、最终生效的 skill 和 rubric；agent 输出和插件 steering 不会进入任务投影。diff 完整的 fast 审查没有导航工具；deep 审查或 diff 截断时，才允许使用部署中已有的只读文件、图片、LSP 与 Git 导航工具。reviewer 不能调用写入、编辑、shell、terminal、部署或自动修复工具。即使父级路由的 provider 默认值更大，`reviewerMaxTokens` 也会约束每次子请求。
+独立 reviewer 是一个全新的 one-shot 子 agent，不继承父会话的推理历史。它接收最近一条直接用户任务中最多 16 KiB 的文本，以及受限的变更证据、检查结果、项目指令、最终生效的 skill 和 rubric；agent 输出和插件 steering 不会进入任务投影。prompt 要求最终消息必须是纯结构化 JSON 对象、不得有散文，文件检查仅限于验证具体候选。diff 完整的 fast 审查没有导航工具；自动门禁对完整 diff 中的普通单行变更保持 checks-only，只有有实质变更的中风险才使用 fast；deep 审查、diff 截断或 diff 缺失时才允许使用部署中已有的只读文件、图片、LSP 与 Git 导航工具。reviewer 不能调用写入、编辑、shell、terminal、部署或自动修复工具。即使父级路由的 provider 默认值更大，`reviewerMaxTokens` 也会约束每次子请求；超过 `reviewerTimeoutMs` 的子 reviewer 会被取消并降级为自审 steering。准备、启动、执行和清理分别受生命周期预算限制；清理是尽力而为，不会替换有效的审查结果。启动超时后所有权转交给有界 watcher：迟到的 handle 会被清理，未确认的 provider 保持 `unknown`，不会被误报为已确认泄漏。生命周期诊断包含 correlation id、受限事件、incident、结果和资源状态。
 
-运行时只接纳高置信度、critical/high 且至少引用一个变更文件行的 candidate。较低置信度 candidate、low/medium 建议、诊断偏好、API 风格建议、可选加固以及只有变更范围外证据的 candidate 都不会进入报告。结构化 schema 把类别限制在稳定的工程分类中，覆盖并发、生命周期、恢复、数据完整性、实时行为、状态与兼容性、安全、验证，以及 HDL 专用的时钟／复位／CDC 和位宽／时序语义。接纳的 finding 还包含置信度、文件和行证据、影响、修复建议与验证方法；运行时生成稳定 id，并把每个接纳的 candidate 映射为 blocker。
-
+运行时只接纳高置信度、critical/high 且至少引用一个落在变更 diff hunk 内的变更文件行的 candidate（行级接纳；diff 截断或缺失时回退到文件级接纳）。较低置信度 candidate、low/medium 建议、诊断偏好、API 风格建议、可选加固以及只有变更范围外证据的 candidate 都不会进入报告。结构化 schema 把类别限制在稳定的工程分类中，覆盖并发、生命周期、恢复、数据完整性、实时行为、状态与兼容性、安全、验证，以及 HDL 专用的时钟／复位／CDC 和位宽／时序语义。接纳的 finding 还包含置信度、文件和行证据、影响、修复建议与验证方法；运行时生成稳定 id，并把每个接纳的 candidate 映射为 blocker。
 ## 项目检查
 
 项目文件具有版本号，并且只包含数据，不接受 shell 字符串：
@@ -71,7 +92,7 @@ checks:
 
 ## 持久化结果
 
-每个已审查 fingerprint 只追加一个精简的 `engineering-review/result` 日志事件。它保留 fingerprint、风险、通过状态、检查状态、简短 finding 标识／标题、类别／置信度、文件与行坐标以及降级原因；证据正文、大段 diff、分析器输出、reviewer prompt 和重复报告都不会持久化。包级 invariant 会验证 `passed` 恰好是必需检查 blocker 与 finding blocker 的反值。
+每个已审查 fingerprint 只追加一个精简的 `engineering-review/result` 日志事件。它保留 fingerprint、风险、通过状态、检查状态、简短 finding 标识／标题、类别／置信度、文件与行坐标、降级原因，以及紧凑的生命周期 id、结果、资源状态、受限事件和 incident；证据正文、大段 diff、分析器输出、reviewer prompt 和重复报告都不会持久化。包级 invariant 会验证 `passed` 恰好是必需检查 blocker 与 finding blocker 的反值。
 
 设计记录：[通用工程质量门禁](../../../.agents/notes/implemented/feature/2026-08-15-engineering-review-quality-gate.md)。服务参考：[工程质量审查子系统](../../../docs/subsystems/engineering-review.md)。
 
@@ -125,4 +146,5 @@ skill 目录会公开 `engineering-review`；只有模型加载该 skill 时，�
 - Git 路径与 diff 上限保证工作量有界，但可能降低 reviewer 精度；超限仍会通过风险与截断标记显式呈现。
 - 自动标准检查发现有意保持很小。使用非标准构建图的项目应提交 `.dsh/engineering-review.yml`。
 - 可选分析器缺失时无法产生其领域诊断；主模型自审是可见的回退，而不是同等证据。
+- provider 未确认启动时，资源所有权保持 `unknown`；迟到 handle 会在 watcher 预算内继续清理，且不能延长 parent agent 路径。
 - reviewer 质量仍受模型影响。稳定 blocker 策略限制升级范围；仍需持续通过前向评测衡量不同领域的召回率与误判 blocker 比例。
