@@ -10,6 +10,10 @@ It uses an architecture where **everything is a plugin**, and is powered by [Cor
 
 DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
 
+## Engineering review plugin
+
+This fork publishes [Engineering Review v0.2 RC 1](https://github.com/lizefu0826-code/deepseek-harness/releases/tag/engineering-review-v0.2-rc.1), an opt-in quality gate that runs deterministic project checks and isolated risk-based review before an agent finishes engineering work. See the [plugin guide](packages/guard/engineering-review/README.md) and optional [hardware adapter](packages/guard/engineering-review-hardware/README.md).
+
 ## Run
 
 ### Run from `npm`
