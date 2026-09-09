@@ -6,6 +6,14 @@ The first domain adapter for [`@deepseek-ai/dsh-engineering-review`](../engineer
 
 > **Experimental test release:** use this adapter with the experimental engineering-review package and verify analyzer results against the project's own toolchain.
 
+## Install
+
+Install the core package first, then add the fixed adapter artifact from the public release:
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
+```
+
 ## Configuration and behavior
 
 ```yaml

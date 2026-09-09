@@ -6,6 +6,20 @@ An opt-in engineering quality gate for DeepSeek Harness. It records the current 
 
 > **Experimental test release:** enable this package explicitly and validate its findings against project-owned checks. Its configuration and review behavior may change before the first stable release.
 
+## Install
+
+The package is not published to npm yet. Install the fixed release artifact directly from GitHub:
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
+```
+
+The tarball declares the matching DeepSeek Harness packages as peer dependencies. Add the optional hardware adapter from the same release when the workspace contains C, C++, embedded, Verilog, or SystemVerilog code:
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
+```
+
 ## Composition
 
 Mount the service after the agent, filesystem, subprocess, skill, tool, and subagent services. The default reviewer provider is the fresh one-shot `spawn` backend; the reviewer inherits the parent agent's LLM provider and model unless `reviewerProvider` or `reviewerModel` is configured. Each reviewer request has an independent `reviewerMaxTokens` output cap, defaulting to 8192, a total `maxReviewContextBytes` input budget, defaulting to 128 KiB, and a `reviewerTimeoutMs` wall-clock deadline, defaulting to 60000 ms. The lifecycle also bounds preparation (`prepareTimeoutMs`, 5000 ms), provider startup (`startTimeoutMs`, 10000 ms), late-handle reclamation (`spawnWatcherTimeoutMs`, 30000 ms), cleanup (`disposeTimeoutMs`, 5000 ms), and the total reviewer path (`totalTimeoutMs`, 90000 ms). The total deadline always wins.

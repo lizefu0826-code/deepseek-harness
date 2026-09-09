@@ -6,6 +6,20 @@
 
 > **实验性测试版本：**请显式启用本包，并使用项目拥有的检查验证其 finding。首次稳定发布前，配置和审查行为可能变化。
 
+## 安装
+
+本包尚未发布到 npm。请直接安装 GitHub Release 中的固定版本产物：
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
+```
+
+该 tarball 会把版本匹配的 DeepSeek Harness 包声明为 peer dependency。如果工作区包含 C、C++、嵌入式、Verilog 或 SystemVerilog 代码，可从同一 Release 安装可选硬件适配器：
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
+```
+
 ## 组合方式
 
 请在 agent、文件系统、子进程、skill、tool 和 subagent 服务之后挂载本服务。默认 reviewer 使用全新的 one-shot `spawn` 后端；如果没有配置 `reviewerProvider` 或 `reviewerModel`，则继承父 agent 的 LLM provider 和 model。每次 reviewer 请求都受独立的 `reviewerMaxTokens` 输出上限约束（默认 8192）、`maxReviewContextBytes` 输入预算（默认 128 KiB）和 `reviewerTimeoutMs` 墙钟时限（默认 60000 ms）约束。生命周期还分别限制准备阶段（`prepareTimeoutMs`，5000 毫秒）、provider 启动（`startTimeoutMs`，10000 毫秒）、迟到 handle 回收（`spawnWatcherTimeoutMs`，30000 毫秒）、清理（`disposeTimeoutMs`，5000 毫秒）和 reviewer 总路径（`totalTimeoutMs`，90000 毫秒）；总 deadline 始终优先。
