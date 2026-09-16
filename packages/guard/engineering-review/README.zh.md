@@ -4,11 +4,21 @@
 
 这是 DeepSeek Harness 中一个按需启用的工程质量门禁。它记录当前轮次的代码变化、运行项目已有的确定性检查、在风险达到阈值时请求隔离的结构化审查，并把有证据支撑的 blocker 送回原 agent，最多进行两轮修正。审查标准覆盖通用工程失效模式，而不绑定某一种语言、协议或设备。
 
-> **实验性测试版本：**请显式启用本包，并使用项目拥有的检查验证其 finding。首次稳定发布前，配置和审查行为可能变化。
+## 为什么用它？
 
-## 安装
+Engineering Review 增加了一道面向工程质量的完成边界，同时避免每次小改动都额外调用模型：
 
-本包尚未发布到 npm。请直接安装 GitHub Release 中的固定版本产物：
+- **先跑确定性检查。** 模型审查之前，优先运行项目已有的检查。
+- **按风险调度 reviewer。** 普通低风险改动可以只跑检查；风险更高时才调度隔离 reviewer。
+- **只让证据充分的问题形成 blocker。** 必需检查失败，或被接纳的高置信度 critical/high finding 才阻止完成。
+- **修正轮次有上限。** 默认最多把 blocker 回送原 agent 两轮，不会无限循环。
+- **可扩展硬件审查。** 可选适配器增加 C/C++／嵌入式和 Verilog/SystemVerilog 风险重点。
+
+## 5 分钟试用
+
+### 1. 安装固定 RC 产物
+
+本包尚未发布到 npm。请直接安装 GitHub Release 中的 tarball：
 
 ```sh
 pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
@@ -19,6 +29,31 @@ pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/e
 ```sh
 pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
 ```
+
+### 2. 启用门禁
+
+在 agent 使用的 Cordis 配置中加入插件：
+
+```yaml
+- id: engineering-review
+  name: '@deepseek-ai/dsh-engineering-review'
+  config:
+    automatic: true
+    riskThreshold: medium
+    maxCorrectionPasses: 2
+```
+
+组合顺序上，请把它放在 agent、文件系统、子进程、skill、tool 和 subagent 服务之后。
+
+### 3. 正常完成一次工程改动
+
+照常使用 agent。到停止边界时，插件会把本轮改动与已捕获基线比较，并运行适用的项目检查。低风险改动可能完全不增加额外模型调用；风险较高的改动才会触发隔离 reviewer。
+
+### 4. 查看结果
+
+干净通过时，不会向父会话追加 steering 消息。必需检查失败，或被接纳的高置信度 critical/high finding，会成为 blocker，并携带证据和验证方法回送原 agent。reviewer／分析器降级不会阻塞，而是回退为一次明确的自审请求。
+
+> **实验性测试版本：**请显式启用本包，并使用项目拥有的检查验证其 finding。首次稳定发布前，配置和审查行为可能变化。
 
 ## 组合方式
 
