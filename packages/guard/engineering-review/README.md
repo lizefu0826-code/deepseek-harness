@@ -4,21 +4,56 @@ English | [中文](README.zh.md)
 
 An opt-in engineering quality gate for DeepSeek Harness. It records the current turn's code changes, runs existing deterministic project checks, requests an isolated structured review when risk warrants it, and steers evidence-backed blockers to the originating agent for at most two correction passes. The rubric covers general engineering failure modes rather than naming one language, protocol, or device.
 
-> **Experimental test release:** enable this package explicitly and validate its findings against project-owned checks. Its configuration and review behavior may change before the first stable release.
+## Why use it?
 
-## Install
+Engineering Review adds a second engineering-specific completion boundary without turning every edit into another model call:
 
-The package is not published to npm yet. Install the fixed release artifact directly from GitHub:
+- **Deterministic checks first.** Existing project checks run before model review.
+- **Risk-gated reviewer.** Low-risk ordinary edits can stay checks-only; higher-risk changes receive an isolated reviewer.
+- **Evidence-backed blockers.** Only admitted high-confidence critical/high findings or required-check failures block completion.
+- **Bounded correction loop.** The originating agent gets at most two repair passes by default, so the gate cannot loop forever.
+- **Hardware-aware extension.** An optional adapter adds C/C++/embedded and Verilog/SystemVerilog risk focus.
+
+## 5-minute trial
+
+### 1. Install the fixed RC artifact
+
+The package is not published to npm yet. Install the release tarball directly from GitHub:
 
 ```sh
 pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
 ```
 
-The tarball declares the matching DeepSeek Harness packages as peer dependencies. Add the optional hardware adapter from the same release when the workspace contains C, C++, embedded, Verilog, or SystemVerilog code:
+The tarball declares the matching DeepSeek Harness packages as peer dependencies. If your workspace contains C, C++, embedded, Verilog, or SystemVerilog code, add the optional hardware adapter from the same release:
 
 ```sh
 pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-hardware-0.1.0-rc.5.tgz
 ```
+
+### 2. Enable the gate
+
+Add the plugin to the Cordis configuration used by your agent:
+
+```yaml
+- id: engineering-review
+  name: '@deepseek-ai/dsh-engineering-review'
+  config:
+    automatic: true
+    riskThreshold: medium
+    maxCorrectionPasses: 2
+```
+
+Keep the plugin after the agent, filesystem, subprocess, skill, tool, and subagent services in composition order.
+
+### 3. Make an engineering change
+
+Use the agent normally. On a stopping boundary, the plugin compares the turn against its captured baseline and runs the applicable project checks. Low-risk changes may finish with no extra model call; riskier changes can trigger an isolated reviewer.
+
+### 4. Read the outcome
+
+A clean pass adds no steering message to the parent conversation. A required-check failure or an admitted high-confidence critical/high finding becomes a blocker and is sent back to the originating agent with evidence and a validation method. Reviewer/analyzer degradation is non-blocking and falls back to an explicit self-review request.
+
+> **Experimental test release:** enable this package explicitly and validate its findings against project-owned checks. Its configuration and review behavior may change before the first stable release.
 
 ## Composition
 
