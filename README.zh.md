@@ -12,7 +12,17 @@ DeepSeek Harness 目前处于 _开发者预览_ 阶段，正在快速迭代。**
 
 ## 工程审查插件
 
-本 fork 已发布 [Engineering Review v0.2 RC 1](https://github.com/lizefu0826-code/deepseek-harness/releases/tag/engineering-review-v0.2-rc.1)。这是一个按需启用的质量门禁，会在 agent 完成工程任务前运行项目已有的确定性检查和基于风险的隔离审查。使用方法见[插件指南](packages/guard/engineering-review/README.md)和可选的[硬件适配器](packages/guard/engineering-review-hardware/README.md)。
+本 fork 已发布 [Engineering Review v0.2 RC 1](https://github.com/lizefu0826-code/deepseek-harness/releases/tag/engineering-review-v0.2-rc.1)。它是一个面向 agent 工程改动、按需启用的质量门禁。
+
+它针对一个很实际的问题：agent 看起来已经“做完”任务，但改动里仍可能残留生命周期、恢复、并发、数据完整性、实时性、HDL 或验证缺陷。Engineering Review 会记录本轮改动、运行项目已有的确定性检查，并且只在风险证据达到条件时调度隔离 reviewer；有证据支撑的 blocker 最多可回送两轮修正。
+
+**直接试固定 RC 产物：**
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
+```
+
+建议从[5 分钟插件指南](packages/guard/engineering-review/README.zh.md)开始。C/C++、嵌入式、Verilog 和 SystemVerilog 项目还可以加入可选的[硬件适配器](packages/guard/engineering-review-hardware/README.md)。
 
 ## 运行
 
