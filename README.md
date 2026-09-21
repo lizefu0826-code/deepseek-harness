@@ -12,7 +12,17 @@ DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. *
 
 ## Engineering review plugin
 
-This fork publishes [Engineering Review v0.2 RC 1](https://github.com/lizefu0826-code/deepseek-harness/releases/tag/engineering-review-v0.2-rc.1), an opt-in quality gate that runs deterministic project checks and isolated risk-based review before an agent finishes engineering work. See the [plugin guide](packages/guard/engineering-review/README.md) and optional [hardware adapter](packages/guard/engineering-review-hardware/README.md).
+This fork publishes [Engineering Review v0.2 RC 1](https://github.com/lizefu0826-code/deepseek-harness/releases/tag/engineering-review-v0.2-rc.1), an opt-in quality gate for agent-written engineering changes.
+
+It is designed for a practical failure mode in coding agents: a task can look finished while still carrying a lifecycle, recovery, concurrency, data-integrity, real-time, HDL, or verification defect. Engineering Review records the turn's changes, runs project-owned deterministic checks, and dispatches an isolated reviewer only when the risk evidence warrants it. Evidence-backed blockers can be sent back for at most two correction passes.
+
+**Try the fixed RC artifact:**
+
+```sh
+pnpm add https://github.com/lizefu0826-code/deepseek-harness/releases/download/engineering-review-v0.2-rc.1/deepseek-ai-dsh-engineering-review-0.1.0-rc.5.tgz
+```
+
+Start with the [5-minute plugin guide](packages/guard/engineering-review/README.md). C/C++, embedded, Verilog, and SystemVerilog projects can also add the optional [hardware adapter](packages/guard/engineering-review-hardware/README.md).
 
 ## Run
 
